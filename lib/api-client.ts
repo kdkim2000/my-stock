@@ -12,7 +12,7 @@ export async function apiFetch(
   });
   if (res.status === 401 && typeof window !== "undefined") {
     const callbackUrl = encodeURIComponent(window.location.pathname + window.location.search);
-    window.location.href = `/api/auth/signin?callbackUrl=${callbackUrl}`;
+    window.location.href = `/auth/signin?callbackUrl=${callbackUrl}`;
     return res;
   }
   return res;
