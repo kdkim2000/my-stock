@@ -1,5 +1,5 @@
+import { createSign } from "crypto";
 import { readFile } from "fs/promises";
-import { JWT } from "google-auth-library";
 import { normalizeRows } from "./normalize-row";
 import type {
   SheetTransactionRow,
@@ -10,6 +10,50 @@ import type {
 
 const SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 const SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
+const TOKEN_AUDIENCE = "https://oauth2.googleapis.com/token";
+
+function base64urlEncode(buf: Buffer): string {
+  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** 서비스 계정 JWT 서명 후 Google OAuth2 토큰 엔드포인트에서 액세스 토큰 교환 (google-auth-library 제거로 번들 경량화) */
+async function getAccessTokenFromServiceAccount(
+  clientEmail: string,
+  privateKeyPem: string
+): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: "RS256", typ: "JWT" };
+  const payload = {
+    iss: clientEmail,
+    scope: SCOPE,
+    aud: TOKEN_AUDIENCE,
+    iat: now,
+    exp: now + 3600,
+  };
+  const headerB64 = base64urlEncode(Buffer.from(JSON.stringify(header), "utf-8"));
+  const payloadB64 = base64urlEncode(Buffer.from(JSON.stringify(payload), "utf-8"));
+  const signatureInput = `${headerB64}.${payloadB64}`;
+  const sign = createSign("RSA-SHA256");
+  sign.update(signatureInput);
+  const sig = sign.sign(privateKeyPem);
+  const jwt = `${signatureInput}.${base64urlEncode(sig)}`;
+
+  const res = await fetch(TOKEN_AUDIENCE, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: jwt,
+    }).toString(),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Google OAuth2 token ${res.status}: ${err}`);
+  }
+  const data = (await res.json()) as { access_token?: string };
+  if (!data.access_token) throw new Error("Google OAuth2 response missing access_token");
+  return data.access_token;
+}
 
 function getSheetName(): string {
   return process.env.GOOGLE_SHEET_NAME ?? "Sheet1";
@@ -31,29 +75,25 @@ function getSpreadsheetId(): string | undefined {
 
 type Auth = { token: string; projectId: string };
 
-/** 서비스 계정으로 액세스 토큰 + project_id 획득. x-goog-user-project로 403 방지 */
+/** 서비스 계정으로 액세스 토큰 + project_id 획득 */
 async function getSheetsAuth(): Promise<Auth> {
   const jsonStr = process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim();
   if (jsonStr) {
     try {
-    const creds = JSON.parse(jsonStr) as {
-      client_email?: string;
-      private_key?: string;
-      project_id?: string;
-    };
-    if (!creds.client_email || !creds.private_key) {
-      throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON must include client_email and private_key");
-    }
-    const projectId = creds.project_id ?? process.env.GOOGLE_CLOUD_PROJECT ?? "";
-    const jwt = new JWT({
-      email: creds.client_email,
-      key: creds.private_key,
-      scopes: [SCOPE],
-    });
-    const credentials = await jwt.authorize();
-    const token = credentials.access_token;
-    if (!token) throw new Error("Failed to get access token");
-    return { token, projectId };
+      const creds = JSON.parse(jsonStr) as {
+        client_email?: string;
+        private_key?: string;
+        project_id?: string;
+      };
+      if (!creds.client_email || !creds.private_key) {
+        throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON must include client_email and private_key");
+      }
+      const projectId = creds.project_id ?? process.env.GOOGLE_CLOUD_PROJECT ?? "";
+      const token = await getAccessTokenFromServiceAccount(
+        creds.client_email,
+        creds.private_key
+      );
+      return { token, projectId };
     } catch (e) {
       if (e instanceof SyntaxError) throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON is invalid JSON");
       throw e;
@@ -71,14 +111,10 @@ async function getSheetsAuth(): Promise<Auth> {
       throw new Error("Key file must include client_email and private_key");
     }
     const projectId = creds.project_id ?? process.env.GOOGLE_CLOUD_PROJECT ?? "";
-    const jwt = new JWT({
-      email: creds.client_email,
-      key: creds.private_key,
-      scopes: [SCOPE],
-    });
-    const credentials = await jwt.authorize();
-    const token = credentials.access_token;
-    if (!token) throw new Error("Failed to get access token");
+    const token = await getAccessTokenFromServiceAccount(
+      creds.client_email,
+      creds.private_key
+    );
     return { token, projectId };
   }
   throw new Error(

@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
+    "dev:clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\" && next dev -p 3000",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
@@ -12,7 +13,6 @@
     "@tanstack/react-query": "^5.90.21",
     "adm-zip": "^0.5.16",
     "clsx": "^2.1.1",
-    "google-auth-library": "^9.0.0",
     "iconv-lite": "^0.7.2",
     "lucide-react": "^0.577.0",
     "next": "15.5.10",
