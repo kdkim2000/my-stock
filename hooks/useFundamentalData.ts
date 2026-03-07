@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { apiFetch } from "@/lib/api-client";
 import type { FundamentalApiResponse } from "@/app/api/fundamental/route";
 
 /** 상세정보 메모이제이션: 30분간 캐시 유지, 갱신 버튼 시에만 재요청 */
@@ -15,7 +16,7 @@ export function useFundamentalData(code: string, revalidateTrigger = 0) {
     queryKey: ["fundamental", normalizedCode, revalidateTrigger],
     queryFn: async () => {
       const revalidate = revalidateTrigger > 0 ? "&revalidate=1" : "";
-      const res = await fetch(`/api/fundamental?code=${encodeURIComponent(normalizedCode)}${revalidate}`);
+      const res = await apiFetch(`/api/fundamental?code=${encodeURIComponent(normalizedCode)}${revalidate}`);
       if (!res.ok) throw new Error("Failed to fetch fundamental data");
       return res.json();
     },

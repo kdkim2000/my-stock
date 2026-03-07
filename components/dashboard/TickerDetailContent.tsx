@@ -26,6 +26,7 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
+import { apiFetch } from "@/lib/api-client";
 import { useAnalysisSummary } from "@/hooks/useAnalysisSummary";
 import { usePortfolioSummary } from "@/hooks/usePortfolioSummary";
 import { useSheetData } from "@/hooks/useSheetData";
@@ -144,7 +145,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
       const url = isCode
         ? `/api/kis/stock-info?code=${encodeURIComponent(tickerOrCode)}`
         : `/api/kis/stock-info?ticker=${encodeURIComponent(tickerOrCode)}`;
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       if (!res.ok) throw new Error("Failed to fetch stock info");
       return res.json();
     },
@@ -159,7 +160,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
   const indicatorsQuery = useQuery<TechnicalIndicatorsResponse>({
     queryKey: ["kis", "indicators", code ?? ""],
     queryFn: async () => {
-      const res = await fetch(`/api/kis/indicators?code=${encodeURIComponent(code!)}`);
+      const res = await apiFetch(`/api/kis/indicators?code=${encodeURIComponent(code!)}`);
       if (!res.ok) throw new Error("Failed to fetch indicators");
       return res.json();
     },
