@@ -37,22 +37,20 @@ async function getAuthClient() {
   if (jsonStr) {
     try {
       const credentials = JSON.parse(jsonStr) as Record<string, unknown>;
-      const auth = new google.auth.GoogleAuth({
+      return new google.auth.GoogleAuth({
         credentials,
         scopes: [SCOPE],
       });
-      return auth;
     } catch (e) {
       throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON is invalid JSON");
     }
   }
   const keyPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
   if (keyPath) {
-    const auth = new google.auth.GoogleAuth({
+    return new google.auth.GoogleAuth({
       keyFile: keyPath,
       scopes: [SCOPE],
     });
-    return auth;
   }
   throw new Error(
     "Set GOOGLE_SERVICE_ACCOUNT_JSON (Vercel) or GOOGLE_APPLICATION_CREDENTIALS (local key file path)"
