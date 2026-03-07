@@ -3,6 +3,8 @@ import { getTransactions } from "@/lib/google-sheets";
 import { computeCumulativePnl } from "@/lib/analysis";
 import type { CumulativePnlPoint } from "@/types/api";
 
+export const dynamic = "force-dynamic";
+
 type Period = "6m" | "1y";
 
 export async function GET(
