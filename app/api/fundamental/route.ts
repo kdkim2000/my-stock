@@ -175,8 +175,8 @@ export async function GET(
         growthRatio: growthRatio ?? null,
         otherMajorRatios: otherMajorRatios ?? null,
         estimatePerform: estimatePerform ?? null,
-        investorTradeDaily: Array.isArray(investorTradeDaily) ? investorTradeDaily : [],
-        dailyTradeVolume: Array.isArray(dailyTradeVolume) ? dailyTradeVolume : [],
+        investorTradeDaily: Array.isArray(investorTradeDaily) ? (investorTradeDaily as KisTradingTrendRow[]) : [],
+        dailyTradeVolume: Array.isArray(dailyTradeVolume) ? (dailyTradeVolume as KisTradingTrendRow[]) : [],
       },
       dart: {
         multiYear: dartTrend?.multiYear ?? [],
