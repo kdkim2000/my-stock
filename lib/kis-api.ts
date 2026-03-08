@@ -7,12 +7,15 @@
  * 토큰 규칙 (KIS): 유효기간 24시간. 한 번 발급한 토큰은 일일간 유효하므로
  * 재발급을 시도하지 않고 access_token_token_expired 기준으로 캐시해 활용하며,
  * 유효기간 경과 시에만 tokenP를 다시 호출합니다.
+ * 재발급은 유효하지 않을 때만: 500 응답 + EGW00123(만료된 token) 수신 시에만 clearKisTokenCache 호출.
+ * 종목/지표 변경과 무관하게 단일 토큰 캐시만 사용합니다.
  * KIS 1분당 1회(EGW00133) 제한 대응: globalThis + 파일 캐시로 워커/인스턴스 간 토큰 공유.
  * @see https://github.com/koreainvestment/open-trading-api
  */
 
 import { readFile, writeFile, mkdir, unlink } from "fs/promises";
 import { existsSync } from "fs";
+import os from "os";
 import path from "path";
 
 import type {
@@ -54,9 +57,15 @@ function getGlobal(): GlobalCache {
   return g[GLOBAL_KEY];
 }
 
-/** 파일 캐시 경로 (.next/cache/kis-token.json). 워커/프로세스 간 공유용. */
+/**
+ * 파일 캐시 경로. 워커/프로세스 간 공유용.
+ * Vercel 서버리스는 파일시스템이 읽기 전용이므로, VERCEL=1 일 때만 쓰기 가능한 os.tmpdir()(예: /tmp)을 사용.
+ */
 function getTokenCachePath(): string {
   try {
+    if (process.env.VERCEL === "1") {
+      return path.join(os.tmpdir(), "kis-token.json");
+    }
     const cwd = process.cwd();
     const dir = path.join(cwd, ".next", "cache");
     return path.join(dir, "kis-token.json");

@@ -42,7 +42,11 @@ import { useAnalysisSummary } from "@/hooks/useAnalysisSummary";
 import { usePortfolioSummary } from "@/hooks/usePortfolioSummary";
 import { useSheetData } from "@/hooks/useSheetData";
 import { useFundamentalData } from "@/hooks/useFundamentalData";
-import type { TickerDetailInfo, TechnicalIndicatorsResponse } from "@/types/api";
+import type {
+  TickerDetailInfo,
+  TechnicalIndicatorsResponse,
+  KisInvestmentOpinion,
+} from "@/types/api";
 import type { SheetTransactionRow } from "@/types/sheet";
 
 const formatFundamentalNum = (v: number) => {
@@ -137,6 +141,83 @@ const DAILY_TRADE_VOLUME_LABELS: Record<string, string> = {
 
 function tradingColumnLabel(key: string, labels: Record<string, string>): string {
   return labels[key] ?? key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** 재무/비율/매매동향 로딩 시 스켈레톤 — animate-pulse 플레이스홀더 */
+function SkeletonBlock({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded bg-muted/60 ${className}`} />;
+}
+
+function FinancialSectionSkeleton() {
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div className="rounded-lg border-2 border-border/50 bg-muted/10 p-5 space-y-3">
+          <SkeletonBlock className="h-3 w-32" />
+          <div className="grid grid-cols-3 gap-4">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="flex flex-col gap-2">
+                <SkeletonBlock className="h-3 w-16" />
+                <SkeletonBlock className="h-6 w-20" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-lg border-2 border-border/50 bg-muted/10 p-5 space-y-3">
+          <SkeletonBlock className="h-3 w-24" />
+          <div className="grid grid-cols-3 gap-4">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="flex flex-col gap-2">
+                <SkeletonBlock className="h-3 w-16" />
+                <SkeletonBlock className="h-6 w-20" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <SkeletonBlock className="h-[220px] w-full rounded-lg" />
+        <SkeletonBlock className="h-[220px] w-full rounded-lg" />
+      </div>
+    </div>
+  );
+}
+
+function RatioSectionSkeleton() {
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <SkeletonBlock className="h-[260px] w-full rounded-lg" />
+        <SkeletonBlock className="h-[260px] w-full rounded-lg" />
+        <SkeletonBlock className="h-[260px] w-full rounded-lg" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {[1, 2, 3, 4, 5, 6].map((i) => (
+          <div key={i} className="rounded-lg border border-border/50 p-4 space-y-2">
+            <SkeletonBlock className="h-3 w-20" />
+            <SkeletonBlock className="h-5 w-16" />
+            <SkeletonBlock className="h-3 w-12" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TradeSectionSkeleton() {
+  return (
+    <div className="space-y-8">
+      <div className="space-y-2">
+        <SkeletonBlock className="h-3 w-64" />
+        <SkeletonBlock className="h-3 w-48" />
+        <SkeletonBlock className="h-72 w-full rounded-lg" />
+      </div>
+      <div className="space-y-2">
+        <SkeletonBlock className="h-3 w-56" />
+        <SkeletonBlock className="h-72 w-full rounded-lg" />
+      </div>
+    </div>
+  );
 }
 
 /** 매매동향 셀 값 포맷: 8자리 일자 → YYYY-MM-DD, 숫자 → 천단위 구분·부호 */
@@ -680,6 +761,18 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
     staleTime: STALE_TIME_DETAIL_MS,
   });
 
+  const opinionQuery = useQuery<KisInvestmentOpinion>({
+    queryKey: ["kis", "opinion", code, revalidateTrigger],
+    queryFn: async () => {
+      const revalidate = revalidateTrigger > 0 ? "&revalidate=1" : "";
+      const res = await apiFetch(`/api/kis/opinion?code=${encodeURIComponent(code!)}${revalidate}`);
+      if (!res.ok) throw new Error("Failed to fetch opinion");
+      return res.json();
+    },
+    enabled: !!code && /^\d{6}$/.test(code),
+    staleTime: STALE_TIME_DETAIL_MS,
+  });
+
   const analysis = useAnalysisSummary();
   const portfolio = usePortfolioSummary();
   const sheet = useSheetData();
@@ -736,7 +829,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
       .join(", ");
     parts.push(`[가치지표] ${ratioLine || "없음"}`);
 
-    const opinion = kis?.opinion?.tickerOpinion;
+    const opinion = opinionQuery.data?.tickerOpinion ?? kis?.opinion?.tickerOpinion;
     if (opinion) {
       const target = opinion.targetPrice != null ? formatRatioVal(opinion.targetPrice) : "—";
       parts.push(
@@ -804,6 +897,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
     fundamentalData.kis,
     fundamentalData.dart?.multiYear,
     indicatorsQuery.data,
+    opinionQuery.data,
     position,
     transactions,
   ]);
@@ -817,15 +911,19 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
   );
   const hasPosition = (position?.quantity ?? 0) > 0;
   const isRefreshing =
-    stockInfoQuery.isRefetching || fundamentalData.isRefetching || indicatorsQuery.isRefetching;
+    stockInfoQuery.isRefetching ||
+    fundamentalData.isRefetching ||
+    indicatorsQuery.isRefetching ||
+    opinionQuery.isRefetching;
 
   const handleRefresh = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["kis", "stock-info", tickerOrCode] });
     void queryClient.refetchQueries({ queryKey: ["kis", "stock-info", tickerOrCode] });
     if (code && /^\d{6}$/.test(code)) {
-      setRevalidateTrigger((t) => t + 1); // fundamental: 새 queryKey로 fetch 시 revalidate=1 전달
+      setRevalidateTrigger((t) => t + 1); // fundamental·opinion: 새 queryKey로 revalidate=1 전달
       queryClient.invalidateQueries({ queryKey: ["fundamental", code] });
       queryClient.invalidateQueries({ queryKey: ["kis", "indicators", code] });
+      queryClient.invalidateQueries({ queryKey: ["kis", "opinion", code] });
       void queryClient.refetchQueries({ queryKey: ["kis", "indicators", code] });
     }
   }, [queryClient, tickerOrCode, code]);
@@ -1151,7 +1249,9 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
             재무 요약 (KIS)
           </h2>
         </div>
-        {(() => {
+        {fundamentalData.isPending ? (
+          <FinancialSectionSkeleton />
+        ) : (() => {
           const kis = fundamentalData.kis;
           const bs = kis?.balanceSheet;
           const inc = kis?.incomeStatement;
@@ -1270,6 +1370,17 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
 
       {/* 비율 (KIS) — 그룹별 카드·결산년월·포맷·증감율 색상 최적화 + 차트 */}
       {(() => {
+        if (fundamentalData.isPending) {
+          return (
+            <section id="section-ratio-kis" className="rounded-2xl border border-border/50 bg-card p-6 scroll-mt-6 shadow-sm">
+              <h2 className="text-lg font-semibold text-foreground mb-5 flex items-center gap-2">
+                <LayoutList className="w-4 h-4 shrink-0 text-muted-foreground" />
+                비율 (KIS)
+              </h2>
+              <RatioSectionSkeleton />
+            </section>
+          );
+        }
         const kis = fundamentalData.kis;
         const finRatio = (kis?.financialRatio ?? null) as Record<string, unknown> | null;
         const allRatioRecs = [
@@ -1420,6 +1531,17 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
 
       {/* 매매동향 (KIS) — 투자자매매동향·일별 체결량 (가치투자 참고) */}
       {(() => {
+        if (fundamentalData.isPending) {
+          return (
+            <section id="section-trade-kis" className="rounded-2xl border border-border/50 bg-card p-6 scroll-mt-6 shadow-sm">
+              <h2 className="text-lg font-semibold text-foreground mb-5 flex items-center gap-2">
+                <BarChart2 className="w-4 h-4 shrink-0 text-muted-foreground" />
+                매매동향 (KIS)
+              </h2>
+              <TradeSectionSkeleton />
+            </section>
+          );
+        }
         const kis = fundamentalData.kis;
         const daily = kis?.investorTradeDaily ?? [];
         const vol = kis?.dailyTradeVolume ?? [];
@@ -1431,9 +1553,9 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
         return (
           <section id="section-trade-kis" className="rounded-2xl border border-border/50 bg-card p-6 scroll-mt-6 shadow-sm">
             <h2 className="text-lg font-semibold text-foreground mb-5 flex items-center gap-2">
-            <BarChart2 className="w-4 h-4 shrink-0 text-muted-foreground" />
-            매매동향 (KIS)
-          </h2>
+              <BarChart2 className="w-4 h-4 shrink-0 text-muted-foreground" />
+              매매동향 (KIS)
+            </h2>
             {!hasAny && (
               <p className="text-sm text-muted-foreground rounded-lg border border-dashed border-border bg-muted/10 p-4">
                 KIS 매매동향 데이터를 가져올 수 없습니다. (일부 종목·기간은 미제공)
@@ -1577,14 +1699,14 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
           </h2>
           <span className="text-xs text-muted-foreground">참고용 정보 · 투자 권유 아님</span>
         </div>
-        {fundamentalData.isPending && !fundamentalData.kis ? (
+        {opinionQuery.isPending ? (
           <p className="text-sm text-muted-foreground">로딩 중…</p>
-        ) : fundamentalData.error ? (
+        ) : opinionQuery.error ? (
           <p className="text-sm text-muted-foreground rounded-lg border border-dashed border-border bg-muted/10 p-4">
             투자의견을 불러올 수 없습니다.
           </p>
         ) : (() => {
-          const opinion = fundamentalData.kis?.opinion;
+          const opinion = opinionQuery.data;
           const ticker = opinion?.tickerOpinion;
           const brokers = opinion?.brokerOpinions ?? [];
           const hasAny = ticker || brokers.length > 0;

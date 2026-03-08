@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import {
   getPriceInfo,
   getKisStockFundamentals,
-  getInvestmentOpinion,
   getKisBalanceSheet,
   getKisIncomeStatement,
   getKisFinancialRatio,
@@ -76,7 +75,8 @@ const SWR_SEC = 600;
 
 /**
  * GET /api/fundamental?code=066570&revalidate=1
- * KIS(현재가·종목정보·투자의견)와 DART(5개년 트렌드·잠정실적 링크·공시 문서)를 Promise.all로 병렬 조회.
+ * KIS(현재가·종목정보·재무·비율·추정실적·매매동향·일봉 등)와 DART(5개년 트렌드·잠정실적 링크·공시 문서)를 먼저 조회한 뒤,
+ * 투자의견은 응답 지연이 크므로 마지막에 단독 조회합니다.
  */
 export async function GET(
   request: Request
@@ -91,9 +91,9 @@ export async function GET(
   }
 
   try {
-    const [priceInfo, opinion, dartTrend] = await Promise.all([
+    // 1단계: 가격·DART 트렌드 먼저 (투자의견 제외 — 지연이 크므로 후순위로 조회)
+    const [priceInfo, dartTrend] = await Promise.all([
       getPriceInfo(code),
-      getInvestmentOpinion(code),
       getDartTrendOnly(code),
     ]);
 
@@ -133,6 +133,7 @@ export async function GET(
       getKisDailyPrice(code),
     ]);
 
+    // 투자의견은 클라이언트에서 /api/kis/opinion 으로 별도 조회 (응답 지연이 커서 본 API에서는 제외)
     const fromRatio = financialRatio
       ? {
           per: parseNum(financialRatio.per ?? financialRatio.prdy_per ?? financialRatio.stck_per),
@@ -142,11 +143,10 @@ export async function GET(
         }
       : { per: 0, pbr: 0, eps: 0, bps: 0 };
     const fromSearchInfo = fundamentals?.ratios;
-    const fromOpinion = opinion?.priceIndicators;
-    let per: number | null = (fromRatio.per > 0 ? fromRatio.per : fromSearchInfo?.per) ?? fromOpinion?.per ?? null;
-    let pbr: number | null = (fromRatio.pbr > 0 ? fromRatio.pbr : fromSearchInfo?.pbr) ?? fromOpinion?.pbr ?? null;
-    let eps: number | null = (fromRatio.eps !== 0 ? fromRatio.eps : fromSearchInfo?.eps) ?? fromOpinion?.eps ?? null;
-    let bps: number | null = (fromRatio.bps !== 0 ? fromRatio.bps : fromSearchInfo?.bps) ?? fromOpinion?.bps ?? null;
+    let per: number | null = (fromRatio.per > 0 ? fromRatio.per : fromSearchInfo?.per) ?? null;
+    let pbr: number | null = (fromRatio.pbr > 0 ? fromRatio.pbr : fromSearchInfo?.pbr) ?? null;
+    let eps: number | null = (fromRatio.eps !== 0 ? fromRatio.eps : fromSearchInfo?.eps) ?? null;
+    let bps: number | null = (fromRatio.bps !== 0 ? fromRatio.bps : fromSearchInfo?.bps) ?? null;
     if (per != null && per <= 0) per = null;
     if (pbr != null && pbr <= 0) pbr = null;
     if (eps != null && eps <= 0) eps = null;
@@ -171,7 +171,7 @@ export async function GET(
         eps,
         bps,
         forwardEps: forwardEps ?? undefined,
-        opinion,
+        opinion: { tickerOpinion: null, brokerOpinions: [] },
         balanceSheet: balanceSheet ?? null,
         incomeStatement: incomeStatement ?? null,
         financialRatio: financialRatio ?? null,

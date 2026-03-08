@@ -2,6 +2,9 @@
 const nextConfig = {
   // Next 15: experimental에서 최상위로 이동
   serverExternalPackages: ["adm-zip"],
+  async rewrites() {
+    return [{ source: "/favicon.ico", destination: "/icon.svg" }];
+  },
   outputFileTracingExcludes: {
     "/api/**": [
       "./node_modules/googleapis/build/src/apis/!(sheets|oauth2)/**/*",
