@@ -12,10 +12,12 @@ import {
   Info,
   LayoutList,
   MessageSquare,
+  Sparkles,
   Table2,
   TrendingUp,
   Wallet,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import {
   BarChart,
   Bar,
@@ -155,6 +157,9 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
 
   const code = stockInfoQuery.data?.code ?? "";
   const [openDoc, setOpenDoc] = useState<"business" | "mda" | "notes" | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiContent, setAiContent] = useState<string | null>(null);
   const fundamentalData = useFundamentalData(code, revalidateTrigger);
 
   const indicatorsQuery = useQuery<TechnicalIndicatorsResponse>({
@@ -205,6 +210,30 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
     void queryClient.refetchQueries({ queryKey: ["kis", "stock-info", tickerOrCode] });
     void queryClient.refetchQueries({ queryKey: ["kis", "indicators", code] });
   }, [queryClient, tickerOrCode, code]);
+
+  const requestAiGuide = useCallback(async () => {
+    if (!code) return;
+    setAiError(null);
+    setAiContent(null);
+    setAiLoading(true);
+    try {
+      const res = await apiFetch("/api/ai/trading-guide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, ticker }),
+      });
+      const data = (await res.json()) as { content?: string; error?: string };
+      if (!res.ok) {
+        setAiError(data.error ?? "요청 실패");
+        return;
+      }
+      setAiContent(data.content ?? null);
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : "요청 중 오류");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [code, ticker]);
 
   if (!tickerOrCode) {
     return (
@@ -272,6 +301,9 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
           </a>
           <a href="#section-indicators" className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground">
             <Activity className="w-3.5 h-3.5 shrink-0" />보조지표
+          </a>
+          <a href="#section-ai-guide" className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground">
+            <Sparkles className="w-3.5 h-3.5 shrink-0" />AI 분석 및 매매 가이드
           </a>
           <a href="#section-reference" className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground">
             <Info className="w-3.5 h-3.5 shrink-0" />참고 지표
@@ -1009,6 +1041,45 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">KIS 연동 후 일봉 데이터로 계산됩니다.</p>
+        )}
+      </section>
+
+      {/* AI 분석 및 매매 가이드 (OpenAI) */}
+      <section id="section-ai-guide" className="rounded-xl border border-border/60 bg-card p-6 scroll-mt-4">
+        <h2 className="text-base font-semibold text-foreground mb-4 flex items-center gap-2">
+          <Sparkles className="w-4 h-4 shrink-0 text-muted-foreground" />
+          AI 분석 및 매매 가이드
+        </h2>
+        <p className="text-xs text-muted-foreground mb-4">
+          시세·가치평가·보조지표·내 포트폴리오를 참고해 투자전략 요약과 매매 가이드(참고)를 생성합니다. 참고용이며 매수/매도 권유가 아닙니다.
+        </p>
+        <div className="flex flex-wrap gap-2 mb-4">
+          <button
+            type="button"
+            onClick={requestAiGuide}
+            disabled={!code || aiLoading}
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {aiLoading ? "분석 중…" : "AI 분석 요청"}
+          </button>
+          {aiContent && (
+            <button
+              type="button"
+              onClick={requestAiGuide}
+              disabled={!code || aiLoading}
+              className="rounded-lg border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-muted/50 disabled:opacity-50"
+            >
+              다시 분석
+            </button>
+          )}
+        </div>
+        {aiError && (
+          <p className="text-sm text-destructive mb-4">분석을 불러올 수 없습니다: {aiError}</p>
+        )}
+        {aiContent && (
+          <div className="prose prose-sm dark:prose-invert max-w-none rounded-lg border border-border/60 bg-muted/20 p-4">
+            <ReactMarkdown>{aiContent}</ReactMarkdown>
+          </div>
         )}
       </section>
 

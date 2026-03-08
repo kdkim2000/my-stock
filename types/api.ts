@@ -245,3 +245,14 @@ export interface TickerDetailInfo {
   /** KIS 투자의견 (종목 + 증권사별) */
   investmentOpinion?: KisInvestmentOpinion | null;
 }
+
+/** POST /api/ai/trading-guide 요청 body */
+export interface TradingGuideRequest {
+  code: string;
+  ticker?: string;
+}
+
+/** POST /api/ai/trading-guide 성공 응답 */
+export interface TradingGuideResponse {
+  content: string;
+}
