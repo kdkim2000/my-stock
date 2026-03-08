@@ -3,7 +3,7 @@ import GoogleProvider from "next-auth/providers/google";
 
 const allowedEmail = process.env.ALLOWED_EMAIL?.trim();
 
-export const authOptions = {
+const authOptions = {
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID ?? "",
@@ -11,7 +11,11 @@ export const authOptions = {
     }),
   ],
   callbacks: {
-    signIn: async ({ user }) => {
+    signIn: async ({
+      user,
+    }: {
+      user: { email?: string | null };
+    }) => {
       if (!allowedEmail) return true;
       return user.email === allowedEmail;
     },
