@@ -8,6 +8,12 @@
   --color-loss: 214 65% 50%;
 }
 
+/* 스크롤 영역: 얇은 스크롤바 (선택적 사용) */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
 @layer base {
   :root {
     --background: 0 0% 98%;

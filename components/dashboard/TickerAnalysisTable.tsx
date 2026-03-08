@@ -90,25 +90,36 @@ export function TickerAnalysisTable() {
     }
   };
 
-  if (analysis.isPending || portfolio.isPending)
-    return <div className="text-muted-foreground">로딩 중...</div>;
-  if (analysis.error) return <div className="text-destructive">종목별 분석을 불러올 수 없습니다.</div>;
+  if (analysis.isPending || portfolio.isPending) {
+    return (
+      <div className="py-12 text-center text-muted-foreground text-sm">
+        로딩 중…
+      </div>
+    );
+  }
+  if (analysis.error) {
+    return (
+      <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-destructive text-sm">
+        종목별 분석을 불러올 수 없습니다.
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex rounded border border-input bg-muted/30 p-0.5">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        <div className="flex rounded-lg border border-border/60 bg-muted/30 p-0.5">
           <button
             type="button"
             onClick={() => setViewMode("held")}
-            className={`rounded px-3 py-1.5 text-sm ${viewMode === "held" ? "bg-background shadow" : "text-muted-foreground hover:text-foreground"}`}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${viewMode === "held" ? "bg-card shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
           >
             보유 종목만
           </button>
           <button
             type="button"
             onClick={() => setViewMode("all")}
-            className={`rounded px-3 py-1.5 text-sm ${viewMode === "all" ? "bg-background shadow" : "text-muted-foreground hover:text-foreground"}`}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${viewMode === "all" ? "bg-card shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"}`}
           >
             과거 투자 포함
           </button>
@@ -118,14 +129,19 @@ export function TickerAnalysisTable() {
           placeholder="종목 검색"
           value={filterTicker}
           onChange={(e) => setFilterTicker(e.target.value)}
-          className="rounded border px-3 py-1.5 text-sm"
+          className="rounded-lg border border-border/60 bg-background px-3 py-1.5 text-sm w-36 sm:w-44 focus:outline-none focus:ring-2 focus:ring-ring/20"
+          aria-label="종목 검색"
         />
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1.5">
           {SORT_KEYS.map(({ key, label }) => (
             <button
               key={key}
               onClick={() => toggleSort(key)}
-              className={`rounded px-2 py-1 text-sm ${sortKey === key ? "bg-primary text-primary-foreground" : "bg-muted"}`}
+              className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                sortKey === key
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border/60 bg-muted/40 text-muted-foreground hover:text-foreground"
+              }`}
             >
               {label} {sortKey === key ? (sortAsc ? "↑" : "↓") : ""}
             </button>
@@ -133,30 +149,32 @@ export function TickerAnalysisTable() {
         </div>
       </div>
       {rows.length === 0 ? (
-        <p className="text-muted-foreground">표시할 종목이 없습니다.</p>
+        <div className="rounded-lg border border-dashed border-border bg-muted/10 py-8 text-center text-muted-foreground text-sm">
+          표시할 종목이 없습니다.
+        </div>
       ) : (
-        <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto -mx-1">
+          <table className="w-full text-sm min-w-[800px]">
             <thead>
-              <tr className="border-b bg-muted/50">
-                <th className="p-3 text-left">종목</th>
-                <th className="p-3 text-right">매수횟수</th>
-                <th className="p-3 text-right">매도횟수</th>
-                <th className="p-3 text-right">총매수금액</th>
-                <th className="p-3 text-right">총매도금액</th>
-                <th className="p-3 text-right">평가금액</th>
-                <th className="p-3 text-right">실현손익</th>
-                <th className="p-3 text-right">실현수익률</th>
-                <th className="p-3 text-right">보유수량</th>
-                <th className="p-3 text-right">평가손익</th>
-                <th className="p-3 text-right">평가수익률</th>
-                <th className="p-3 text-right">승률</th>
-                <th className="p-3 text-left">참고</th>
+              <tr className="border-b border-border/60 bg-muted/40">
+                <th className="p-3 text-left text-xs font-medium text-muted-foreground">종목</th>
+                <th className="p-3 text-right text-xs font-medium text-muted-foreground">매수</th>
+                <th className="p-3 text-right text-xs font-medium text-muted-foreground">매도</th>
+                <th className="p-3 text-right text-xs font-medium text-muted-foreground">총매수</th>
+                <th className="p-3 text-right text-xs font-medium text-muted-foreground">총매도</th>
+                <th className="p-3 text-right text-xs font-medium text-muted-foreground">평가</th>
+                <th className="p-3 text-right text-xs font-medium text-muted-foreground">실현손익</th>
+                <th className="p-3 text-right text-xs font-medium text-muted-foreground">실현률</th>
+                <th className="p-3 text-right text-xs font-medium text-muted-foreground">보유</th>
+                <th className="p-3 text-right text-xs font-medium text-muted-foreground">평가손익</th>
+                <th className="p-3 text-right text-xs font-medium text-muted-foreground">평가률</th>
+                <th className="p-3 text-right text-xs font-medium text-muted-foreground">승률</th>
+                <th className="p-3 text-left text-xs font-medium text-muted-foreground">참고</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.ticker} className="border-b hover:bg-muted/30">
+                <tr key={r.ticker} className="border-b border-border/40 hover:bg-muted/20 transition-colors">
                   <td className="p-3 font-medium">
                     <Link href={`/dashboard/ticker/${encodeURIComponent(r.ticker)}`} className="hover:underline">
                       {r.ticker}

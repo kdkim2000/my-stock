@@ -16,28 +16,48 @@ export function CumulativePnlChart() {
   const [period, setPeriod] = useState<"6m" | "1y">("6m");
   const { data, isPending, error } = useCumulativePnl(period);
 
-  if (isPending) return <div className="text-muted-foreground">로딩 중...</div>;
-  if (error) return <div className="text-destructive">누적 수익 데이터를 불러올 수 없습니다.</div>;
+  if (isPending) {
+    return (
+      <div className="h-[280px] flex items-center justify-center text-muted-foreground text-sm">
+        로딩 중…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-destructive text-sm">
+        누적 수익 데이터를 불러올 수 없습니다.
+      </div>
+    );
+  }
 
   const points = data ?? [];
   const displayData = points.map((p) => ({ ...p, name: p.date }));
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="font-medium">누적 실현 수익금 추이</h3>
-        <div className="flex gap-1">
+        <span className="text-sm font-medium text-muted-foreground">기간 선택</span>
+        <div className="flex gap-1.5">
           <button
             type="button"
             onClick={() => setPeriod("6m")}
-            className={`rounded px-2 py-1 text-sm ${period === "6m" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
+            className={`rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${
+              period === "6m"
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border/60 bg-muted/40 text-muted-foreground hover:text-foreground"
+            }`}
           >
             6개월
           </button>
           <button
             type="button"
             onClick={() => setPeriod("1y")}
-            className={`rounded px-2 py-1 text-sm ${period === "1y" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
+            className={`rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${
+              period === "1y"
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border/60 bg-muted/40 text-muted-foreground hover:text-foreground"
+            }`}
           >
             1년
           </button>
@@ -45,7 +65,7 @@ export function CumulativePnlChart() {
       </div>
       <div className="h-[280px] w-full">
         {displayData.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-muted-foreground">
+          <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border bg-muted/10 text-muted-foreground text-sm">
             기간 내 데이터가 없습니다.
           </div>
         ) : (

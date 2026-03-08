@@ -50,19 +50,37 @@ export function TransactionTable() {
     return Array.from({ length: high - low + 1 }, (_, i) => low + i);
   }, [totalPages, page]);
 
-  if (isPending) return <div className="text-muted-foreground">로딩 중...</div>;
-  if (error) return <div className="text-destructive">거래 내역을 불러올 수 없습니다.</div>;
-  if (transactions.length === 0) return <div className="text-muted-foreground">거래 내역이 없습니다. Google Sheets를 연동하면 여기에 표시됩니다.</div>;
+  if (isPending) {
+    return (
+      <div className="py-8 text-center text-muted-foreground text-sm">
+        로딩 중…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-destructive text-sm">
+        거래 내역을 불러올 수 없습니다.
+      </div>
+    );
+  }
+  if (transactions.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-border bg-muted/10 px-4 py-8 text-center text-muted-foreground text-sm">
+        거래 내역이 없습니다. Google Sheets를 연동하면 여기에 표시됩니다.
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <label className="flex items-center gap-2 text-sm text-muted-foreground">
           페이지당 건수
           <select
             value={pageSize}
             onChange={(e) => handlePageSizeChange(Number(e.target.value))}
-            className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+            className="rounded-lg border border-border/60 bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring/20"
             aria-label="페이지당 건수"
           >
             {PAGE_SIZE_OPTIONS.map((n) => (
@@ -73,24 +91,24 @@ export function TransactionTable() {
           </select>
         </label>
       </div>
-      <div className="overflow-x-auto rounded-md border">
+      <div className="overflow-x-auto rounded-lg border border-border/50">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b bg-muted/50">
-              <th className="p-3 text-left">일자</th>
-              <th className="p-3 text-left">종목</th>
-              <th className="p-3 text-left">구분</th>
-              <th className="p-3 text-right">수량</th>
-              <th className="p-3 text-right">단가</th>
-              <th className="p-3 text-right">수수료</th>
-              <th className="p-3 text-right">세금</th>
+            <tr className="border-b border-border/60 bg-muted/40">
+              <th className="p-3 text-left text-xs font-medium text-muted-foreground">일자</th>
+              <th className="p-3 text-left text-xs font-medium text-muted-foreground">종목</th>
+              <th className="p-3 text-left text-xs font-medium text-muted-foreground">구분</th>
+              <th className="p-3 text-right text-xs font-medium text-muted-foreground">수량</th>
+              <th className="p-3 text-right text-xs font-medium text-muted-foreground">단가</th>
+              <th className="p-3 text-right text-xs font-medium text-muted-foreground">수수료</th>
+              <th className="p-3 text-right text-xs font-medium text-muted-foreground">세금</th>
             </tr>
           </thead>
           <tbody>
             {paginatedRows.map((row, i) => {
               const globalIndex = (page - 1) * pageSize + i;
               return (
-                <tr key={globalIndex} className="border-b hover:bg-muted/30">
+                <tr key={globalIndex} className="border-b border-border/40 hover:bg-muted/20 transition-colors">
                   <td className="p-3">{row.Date}</td>
                   <td className="p-3">{row.Ticker}</td>
                   <td className="p-3">{row.Type}</td>

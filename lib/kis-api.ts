@@ -230,6 +230,7 @@ const KIS_TR_PATH: Record<string, string> = {
   FHKST663400C0: "/uapi/domestic-stock/v1/quotations/invest-opbysec",
   FHPTJ04160001: "/uapi/domestic-stock/v1/quotations/investor-trade-by-stock-daily",
   FHKST03010800: "/uapi/domestic-stock/v1/quotations/inquire-daily-trade-volume",
+  FHKST01010400: "/uapi/domestic-stock/v1/quotations/inquire-daily-price",
 };
 
 /**
@@ -793,14 +794,22 @@ async function getKisStockFundamentalsFromSearchInfo(
 
 /** finance API 공통: output/output1/output2에서 단일 객체 또는 배열 첫 항목 추출 */
 function pickFirstOutput(body: Record<string, unknown>): Record<string, unknown> | null {
-  let out: unknown = body.output ?? body.output1 ?? body.output2;
-  if (Array.isArray(out)) out = (out as Record<string, unknown>[])[0] ?? null;
-  if (out != null && typeof out === "object" && !Array.isArray(out)) {
-    const obj = out as Record<string, unknown>;
-    const values = Object.values(obj);
-    const firstObj = values.find((v) => v != null && typeof v === "object" && !Array.isArray(v));
-    if (firstObj != null) return firstObj as Record<string, unknown>;
-    return obj;
+  for (const key of ["output", "output1", "output2"] as const) {
+    const raw = body[key];
+    if (raw == null) continue;
+    if (Array.isArray(raw) && raw.length > 0) {
+      const first = raw[0];
+      if (first != null && typeof first === "object" && !Array.isArray(first))
+        return first as Record<string, unknown>;
+      continue;
+    }
+    if (typeof raw === "object" && !Array.isArray(raw)) {
+      const obj = raw as Record<string, unknown>;
+      const values = Object.values(obj);
+      const firstObj = values.find((v) => v != null && typeof v === "object" && !Array.isArray(v));
+      if (firstObj != null) return firstObj as Record<string, unknown>;
+      if (Object.keys(obj).length > 0) return obj;
+    }
   }
   return null;
 }
@@ -818,12 +827,55 @@ function toKisDate00(dateInput: string | Date): string {
   return `00${yyyymmdd}`;
 }
 
+/** Date → YYYYMMDD (연도 변경 포함 정확한 날짜 계산용) */
+function dateToYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}${m}${day}`;
+}
+
+/** 날짜에 n일 가산 (새 Date 인스턴스 반환, 연·월 경계 정확히 처리) */
+function addDays(d: Date, n: number): Date {
+  const out = new Date(d.getTime());
+  out.setDate(out.getDate() + n);
+  return out;
+}
+
 /** 최근 3개월 구간을 KIS 00년월일 형식으로 반환 (FID_INPUT_DATE_1, FID_INPUT_DATE_2용) */
 function getLast3MonthsKisDates(): { start: string; end: string } {
   const end = new Date();
   const start = new Date();
   start.setMonth(start.getMonth() - 3);
   return { start: toKisDate00(start), end: toKisDate00(end) };
+}
+
+/**
+ * 투자자매매동향용: 오늘 기준 정확히 90일 구간 (Start = 오늘-90일, End = 오늘).
+ * Date 객체 독립성 보장: 종료일과 시작일에 서로 다른 new Date() 인스턴스 사용. 절대 동일 참조/변조 금지.
+ */
+function getLast90DaysKisDates(): { startYmd: string; endYmd: string; startKis: string; endKis: string } {
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - 90);
+  const startYmd = dateToYmd(startDate);
+  const endYmd = dateToYmd(endDate);
+  if (startYmd >= endYmd) {
+    const fallbackStart = new Date();
+    fallbackStart.setDate(fallbackStart.getDate() - 91);
+    return {
+      startYmd: dateToYmd(fallbackStart),
+      endYmd,
+      startKis: toKisDate00(fallbackStart),
+      endKis: toKisDate00(endDate),
+    };
+  }
+  return {
+    startYmd,
+    endYmd,
+    startKis: toKisDate00(startDate),
+    endKis: toKisDate00(endDate),
+  };
 }
 
 /** 최근 분기 말일 YYYYMMDD (재무 API 기준일로 사용) */
@@ -837,54 +889,71 @@ function getLatestQuarterEnd(): string {
   return `${y}${String(lastMonth + 1).padStart(2, "0")}${String(lastDay).padStart(2, "0")}`;
 }
 
-/** 대차대조표 (FHKST66430100) */
+/** 대차대조표 (FHKST66430100). 0값도 포함해 반환하면 UI에서 재무 요약 섹션이 표시됨 */
 export async function getKisBalanceSheet(code: string): Promise<Record<string, number> | null> {
-  if (!/^\d{6}$/.test(String(code).trim())) return null;
+  if (!/^\d{6}$/.test(String(code).trim())) {
+    if (process.env.NODE_ENV === "development") console.log("[KIS] balanceSheet skip: invalid code");
+    return null;
+  }
   const path = KIS_TR_PATH.FHKST66430100;
   if (!path) return null;
   const codeStr = String(code).trim();
-  let body = await kisGet(path, "FHKST66430100", codeStr, { FID_INPUT_DATE_1: getLatestQuarterEnd(), FID_DIV_CLS_CODE: process.env.KIS_FID_DIV_CLS_CODE ?? "0" });
+  const quarterEnd = getLatestQuarterEnd();
+  let body = await kisGet(path, "FHKST66430100", codeStr, { FID_INPUT_DATE_1: quarterEnd, FID_DIV_CLS_CODE: process.env.KIS_FID_DIV_CLS_CODE ?? "0" });
   if (!body) body = await kisGet(path, "FHKST66430100", codeStr, { FID_DIV_CLS_CODE: process.env.KIS_FID_DIV_CLS_CODE ?? "0" });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[KIS] balanceSheet code=%s quarterEnd=%s body=%s", codeStr, quarterEnd, body ? "ok" : "null");
+  }
   if (!body) return null;
   const out = pickFirstOutput(body);
+  if (process.env.NODE_ENV === "development") {
+    console.log("[KIS] balanceSheet code=%s pickFirstOutput=%s keys=%s", codeStr, out ? "ok" : "null", out ? Object.keys(out).join(",") : "");
+  }
   if (!out) return null;
-  const totalAssets = parseNum(out.tot_aset ?? out.total_assets ?? out.자산총계);
-  const totalLiabilities = parseNum(out.tot_liab ?? out.total_liabilities ?? out.부채총계);
-  const totalEquity = parseNum(out.tot_eqty ?? out.total_equity ?? out.자본총계);
-  const cur = parseNum(out.cur_aset ?? out.current_assets ?? out.유동자산);
-  const nonCur = parseNum(out.non_cur_aset ?? out.noncurrent_assets ?? out.비유동자산);
-  const curLiab = parseNum(out.cur_liab ?? out.current_liabilities ?? out.유동부채);
-  const nonCurLiab = parseNum(out.non_cur_liab ?? out.noncurrent_liabilities ?? out.비유동부채);
-  const result: Record<string, number> = {};
-  if (totalAssets > 0) result.totalAssets = totalAssets;
-  if (totalLiabilities > 0) result.totalLiabilities = totalLiabilities;
-  if (totalEquity > 0) result.totalEquity = totalEquity;
-  if (cur > 0) result.currentAssets = cur;
-  if (nonCur > 0) result.nonCurrentAssets = nonCur;
-  if (curLiab > 0) result.currentLiabilities = curLiab;
-  if (nonCurLiab > 0) result.nonCurrentLiabilities = nonCurLiab;
-  return Object.keys(result).length > 0 ? result : null;
+  const totalAssets = parseNum(out.total_aset ?? out.tot_aset ?? out.total_assets ?? out.자산총계 ?? out.TOT_ASET);
+  const totalLiabilities = parseNum(out.total_lblt ?? out.tot_liab ?? out.total_liabilities ?? out.부채총계 ?? out.TOT_LIAB);
+  const totalEquity = parseNum(out.total_cptl ?? out.tot_eqty ?? out.total_equity ?? out.자본총계 ?? out.TOT_EQTY);
+  const cur = parseNum(out.cras ?? out.cur_aset ?? out.current_assets ?? out.유동자산 ?? out.CUR_ASET);
+  const nonCur = parseNum(out.fxas ?? out.non_cur_aset ?? out.noncurrent_assets ?? out.비유동자산 ?? out.NON_CUR_ASET);
+  const curLiab = parseNum(out.flow_lblt ?? out.cur_liab ?? out.current_liabilities ?? out.유동부채 ?? out.CUR_LIAB);
+  const nonCurLiab = parseNum(out.fix_lblt ?? out.non_cur_liab ?? out.noncurrent_liabilities ?? out.비유동부채 ?? out.NON_CUR_LIAB);
+  const result: Record<string, number> = {
+    totalAssets,
+    totalLiabilities,
+    totalEquity,
+  };
+  if (cur !== 0) result.currentAssets = cur;
+  if (nonCur !== 0) result.nonCurrentAssets = nonCur;
+  if (curLiab !== 0) result.currentLiabilities = curLiab;
+  if (nonCurLiab !== 0) result.nonCurrentLiabilities = nonCurLiab;
+  return result;
 }
 
-/** 손익계산서 (FHKST66430200) */
+/** 손익계산서 (FHKST66430200). 0값도 포함해 반환하면 UI에서 재무 요약 섹션이 표시됨 */
 export async function getKisIncomeStatement(code: string): Promise<Record<string, number> | null> {
-  if (!/^\d{6}$/.test(String(code).trim())) return null;
+  if (!/^\d{6}$/.test(String(code).trim())) {
+    if (process.env.NODE_ENV === "development") console.log("[KIS] incomeStatement skip: invalid code");
+    return null;
+  }
   const path = KIS_TR_PATH.FHKST66430200;
   if (!path) return null;
   const codeStr = String(code).trim();
-  let body = await kisGet(path, "FHKST66430200", codeStr, { FID_INPUT_DATE_1: getLatestQuarterEnd(), FID_DIV_CLS_CODE: process.env.KIS_FID_DIV_CLS_CODE ?? "0" });
+  const quarterEnd = getLatestQuarterEnd();
+  let body = await kisGet(path, "FHKST66430200", codeStr, { FID_INPUT_DATE_1: quarterEnd, FID_DIV_CLS_CODE: process.env.KIS_FID_DIV_CLS_CODE ?? "0" });
   if (!body) body = await kisGet(path, "FHKST66430200", codeStr, { FID_DIV_CLS_CODE: process.env.KIS_FID_DIV_CLS_CODE ?? "0" });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[KIS] incomeStatement code=%s quarterEnd=%s body=%s", codeStr, quarterEnd, body ? "ok" : "null");
+  }
   if (!body) return null;
   const out = pickFirstOutput(body);
+  if (process.env.NODE_ENV === "development") {
+    console.log("[KIS] incomeStatement code=%s pickFirstOutput=%s keys=%s", codeStr, out ? "ok" : "null", out ? Object.keys(out).join(",") : "");
+  }
   if (!out) return null;
-  const revenue = parseNum(out.rev ?? out.revenue ?? out.매출액);
-  const operatingIncome = parseNum(out.op_inc ?? out.operating_income ?? out.영업이익);
-  const netIncome = parseNum(out.net_inc ?? out.net_income ?? out.당기순이익);
-  const result: Record<string, number> = {};
-  if (revenue !== 0) result.revenue = revenue;
-  if (operatingIncome !== 0) result.operatingIncome = operatingIncome;
-  if (netIncome !== 0) result.netIncome = netIncome;
-  return Object.keys(result).length > 0 ? result : null;
+  const revenue = parseNum(out.sale_account ?? out.rev ?? out.revenue ?? out.매출액 ?? out.REV);
+  const operatingIncome = parseNum(out.op_prfi ?? out.bsop_prti ?? out.op_inc ?? out.operating_income ?? out.영업이익 ?? out.OP_INC);
+  const netIncome = parseNum(out.thtr_ntin ?? out.net_inc ?? out.net_income ?? out.당기순이익 ?? out.NET_INC);
+  return { revenue, operatingIncome, netIncome };
 }
 
 /** 재무/비율 API 공통: 기준일 + 재무제표 구분(0=개별, 1=연결). OPSQ2001 FID_DIV_CLS_CODE 방지 */
@@ -893,18 +962,49 @@ const financeExtraParams = () => ({
   FID_DIV_CLS_CODE: process.env.KIS_FID_DIV_CLS_CODE ?? "0",
 });
 
-/** 재무비율 (FHKST66430300) — PER, PBR, EPS, BPS, ROE, ROA 등 */
+/** 재무비율 API(FHKST66430300) 스펙 output 필드 — 숫자로 파싱해 채움 */
+const FINANCIAL_RATIO_NUM_KEYS = [
+  "grs", "bsop_prfi_inrt", "ntin_inrt", "roe_val", "eps", "sps", "bps", "rsrv_rate", "lblt_rate",
+  "per", "pbr", "prdy_per", "prdy_pbr", "stck_per", "stck_pbr", "prdy_eps", "stck_eps", "prdy_bps", "stck_bps",
+  "PER", "PBR", "EPS", "BPS",
+] as const;
+
+function normalizeFinancialRatioOutput(raw: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object") return null;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (v === undefined || v === null) continue;
+    if (FINANCIAL_RATIO_NUM_KEYS.includes(k as (typeof FINANCIAL_RATIO_NUM_KEYS)[number])) {
+      const n = parseNum(v);
+      if (!Number.isNaN(n)) out[k] = n;
+    } else if (typeof v === "number" && !Number.isNaN(v)) {
+      out[k] = v;
+    } else if (typeof v === "string" && /^-?\d+\.?\d*$/.test(v.trim())) {
+      const n = parseNum(v);
+      if (!Number.isNaN(n)) out[k] = n;
+    } else if (typeof v === "string") {
+      out[k] = v;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * 재무비율 (FHKST66430300) — 국내주식 재무비율 API.
+ * API 스펙: GET /uapi/domestic-stock/v1/finance/financial-ratio
+ * Query 필수: FID_DIV_CLS_CODE(0=년,1=분기), fid_cond_mrkt_div_code(J), fid_input_iscd(종목코드).
+ * 응답 output: stac_yymm, grs, bsop_prfi_inrt, ntin_inrt, roe_val, eps, sps, bps, rsrv_rate, lblt_rate 등.
+ */
 export async function getKisFinancialRatio(code: string): Promise<Record<string, unknown> | null> {
   if (!/^\d{6}$/.test(String(code).trim())) return null;
   const path = KIS_TR_PATH.FHKST66430300;
   if (!path) return null;
   const codeStr = String(code).trim();
   const divCls = process.env.KIS_FID_DIV_CLS_CODE ?? "0";
-  let body = await kisGet(path, "FHKST66430300", codeStr, financeExtraParams());
-  if (!body) body = await kisGet(path, "FHKST66430300", codeStr, { FID_DIV_CLS_CODE: divCls });
+  const body = await kisGet(path, "FHKST66430300", codeStr, { FID_DIV_CLS_CODE: divCls });
   if (!body) return null;
   const out = pickFirstOutput(body);
-  return out;
+  return normalizeFinancialRatioOutput(out);
 }
 
 /** 수익성비율 (FHKST66430400) */
@@ -959,14 +1059,84 @@ export async function getKisOtherMajorRatios(code: string): Promise<Record<strin
   return pickFirstOutput(body);
 }
 
-/** 종목추정실적 (HHKST668300C0) — Forward EPS 등. OPSQ2001 SHT_CD 방지(0=전체) */
+/** KIS 종목추정실적 API 응답 정규화. 스펙: output2(추정손익 6개 배열), output3(투자지표 8개 배열), 각 data1~data5 */
+function normalizeEstimatePerformOutput(body: Record<string, unknown>): Record<string, unknown> | null {
+  const output2 = body.output2 as Array<Record<string, unknown>> | undefined;
+  const output3 = body.output3 as Array<Record<string, unknown>> | undefined;
+  if (!Array.isArray(output2) && !Array.isArray(output3)) return null;
+
+  const result: Record<string, unknown> = {};
+  const parseVal = (v: unknown): number | null => {
+    if (v == null || v === "") return null;
+    const n = Number(String(v).replace(/,/g, ""));
+    return Number.isNaN(n) ? null : n;
+  };
+  const setData = (arr: Record<string, unknown>[], keys: string[], prefix: string) => {
+    arr.forEach((row, i) => {
+      const key = keys[i];
+      if (!key) return;
+      const v = row.data1 ?? row.data2 ?? row.data3;
+      const num = parseVal(v);
+      if (num != null) result[prefix + key] = num;
+      else if (v != null && String(v).trim() !== "") result[prefix + key] = v;
+    });
+  };
+
+  // output2: 매출액, 매출액증감율, 영업이익, 영업이익증감율, 순이익, 순이익증감율 (스펙 순서)
+  if (Array.isArray(output2) && output2.length >= 6) {
+    setData(output2, ["매출액", "매출액증감율", "영업이익", "영업이익증감율", "순이익", "순이익증감율"], "");
+    const rev = parseVal(output2[0]?.data1 ?? output2[0]?.data2);
+    const op = parseVal(output2[2]?.data1 ?? output2[2]?.data2);
+    const ni = parseVal(output2[4]?.data1 ?? output2[4]?.data2);
+    if (rev != null) result.revenue = rev;
+    if (op != null) result.operating_income = op;
+    if (ni != null) result.net_income = ni;
+  }
+
+  // output3: EBITDA(십억), EPS(원), EPS증감율, PER, EV/EBITDA, ROE, 부채비율, 이자보상배율 (스펙 순서 8개)
+  if (Array.isArray(output3) && output3.length >= 8) {
+    setData(output3, ["EBITDA", "EPS", "EPS증감율", "PER", "EV/EBITDA", "ROE", "부채비율", "이자보상배율"], "");
+    const epsVal = parseVal(output3[1]?.data1 ?? output3[1]?.data2);
+    if (epsVal != null) {
+      result.eps = epsVal;
+      result.fwd_eps = epsVal;
+      result.forward_eps = epsVal;
+    }
+    const ebitdaVal = parseVal(output3[0]?.data1 ?? output3[0]?.data2);
+    if (ebitdaVal != null) result.ebitda = ebitdaVal * 1e8; // 십억원 → 원
+    const perVal = parseVal(output3[3]?.data1 ?? output3[3]?.data2);
+    if (perVal != null) result.per = perVal;
+    const roeVal = parseVal(output3[5]?.data1 ?? output3[5]?.data2);
+    if (roeVal != null) result.roe = roeVal;
+  }
+
+  if (Object.keys(result).length === 0) return null;
+  return result;
+}
+
+/** 종목추정실적 (HHKST668300C0). 스펙: Query SHT_CD=종목코드(6자리), 응답 output1~output4 */
 export async function getKisEstimatePerform(code: string): Promise<Record<string, unknown> | null> {
-  if (!/^\d{6}$/.test(String(code).trim())) return null;
+  const codeStr = String(code).trim();
+  if (!/^\d{6}$/.test(codeStr)) return null;
   const path = KIS_TR_PATH.HHKST668300C0;
   if (!path) return null;
-  const body = await kisGet(path, "HHKST668300C0", String(code).trim(), { SHT_CD: process.env.KIS_ESTIMATE_SHT_CD ?? "0" });
-  if (!body) return null;
-  return pickFirstOutput(body);
+  // 스펙: Query Parameter SHT_CD = 종목코드(필수), ex) 265520
+  const body = await kisGet(path, "HHKST668300C0", codeStr, { SHT_CD: codeStr });
+  if (!body) {
+    if (process.env.NODE_ENV === "development") {
+      console.log("[KIS] estimatePerform code=%s body=null (kisGet 실패)", codeStr);
+    }
+    return null;
+  }
+  const normalized = normalizeEstimatePerformOutput(body);
+  if (normalized != null) return normalized;
+  // 폴백: output1 단일 객체(종목정보)라도 반환
+  const out1 = pickFirstOutput(body);
+  if (out1 != null && Object.keys(out1).length > 0) return out1;
+  if (process.env.NODE_ENV === "development") {
+    console.log("[KIS] estimatePerform code=%s normalized=null bodyKeys=%s", codeStr, Object.keys(body).join(","));
+  }
+  return null;
 }
 
 /** 오늘 날짜 YYYYMMDD (투자의견 등 기준일용) */
@@ -974,38 +1144,143 @@ function getTodayYyyymmdd(): string {
   return new Date().toISOString().slice(0, 10).replace(/-/g, "");
 }
 
-/** 종목투자의견 (FHKST663300C0). OPSQ2001: FID_COND_SCR_DIV_CODE(J), FID_INPUT_DATE_1/2(00년월일, 최근 3개월) */
+/** 종목투자의견 (FHKST663300C0). 스펙: FID_COND_SCR_DIV_CODE=16633(Primary key), FID_INPUT_DATE_1/2=00년월일(최근 3개월) */
 export async function getKisInvestOpinion(code: string): Promise<Record<string, unknown> | null> {
-  if (!/^\d{6}$/.test(String(code).trim())) return null;
+  const codeStr = String(code).trim();
+  if (!/^\d{6}$/.test(codeStr)) return null;
   const path = KIS_TR_PATH.FHKST663300C0;
   if (!path) return null;
   const { start, end } = getLast3MonthsKisDates();
-  const body = await kisGet(path, "FHKST663300C0", String(code).trim(), {
-    FID_COND_SCR_DIV_CODE: process.env.KIS_COND_SCR_DIV_CODE ?? "J",
+  const body = await kisGet(path, "FHKST663300C0", codeStr, {
+    FID_COND_SCR_DIV_CODE: process.env.KIS_OPINION_SCR_DIV_CODE ?? "16633",
     FID_INPUT_DATE_1: start,
     FID_INPUT_DATE_2: end,
   });
-  if (!body) return null;
-  return pickFirstOutput(body);
+  if (!body) {
+    if (process.env.NODE_ENV === "development") {
+      console.log("[KIS] investOpinion code=%s body=null (kisGet 실패) start=%s end=%s", codeStr, start, end);
+    }
+    return null;
+  }
+  const out = pickFirstOutput(body);
+  if (process.env.NODE_ENV === "development" && out == null) {
+    console.log("[KIS] investOpinion code=%s pickFirstOutput=null bodyKeys=%s", codeStr, Object.keys(body).join(","));
+  }
+  return out;
 }
 
-/** 증권사별 투자의견 (FHKST663400C0). OPSQ2001: FID_COND_SCR_DIV_CODE(J), FID_DIV_CLS_CODE(0), FID_INPUT_DATE_1/2(00년월일) */
+/** 증권사별 투자의견 (FHKST663400C0). 스펙: FID_COND_SCR_DIV_CODE=16634(Primary key), FID_DIV_CLS_CODE=0(전체), FID_INPUT_ISCD=종목코드 */
 export async function getKisInvestOpinionBySec(code: string): Promise<unknown[]> {
-  if (!/^\d{6}$/.test(String(code).trim())) return [];
+  const codeStr = String(code).trim();
+  if (!/^\d{6}$/.test(codeStr)) return [];
   const path = KIS_TR_PATH.FHKST663400C0;
   if (!path) return [];
   const { start, end } = getLast3MonthsKisDates();
-  const body = await kisGet(path, "FHKST663400C0", String(code).trim(), {
-    FID_COND_SCR_DIV_CODE: process.env.KIS_COND_SCR_DIV_CODE ?? "J",
+  const body = await kisGet(path, "FHKST663400C0", codeStr, {
+    FID_COND_SCR_DIV_CODE: process.env.KIS_OPINION_BYSEC_SCR_DIV_CODE ?? "16634",
     FID_DIV_CLS_CODE: process.env.KIS_OPINION_DIV_CLS_CODE ?? "0",
     FID_INPUT_DATE_1: start,
     FID_INPUT_DATE_2: end,
   });
-  if (!body) return [];
-  return extractListFromKisBody(body as Record<string, unknown>);
+  if (!body) {
+    if (process.env.NODE_ENV === "development") {
+      console.log("[KIS] investOpinionBySec code=%s body=null (kisGet 실패) start=%s end=%s", codeStr, start, end);
+    }
+    return [];
+  }
+  const list = extractListFromKisBody(body as Record<string, unknown>);
+  if (process.env.NODE_ENV === "development" && list.length === 0) {
+    console.log("[KIS] investOpinionBySec code=%s extractList=0 bodyKeys=%s", codeStr, Object.keys(body).join(","));
+  }
+  return list;
 }
 
-/** 투자자매매동향 일별 (FHPTJ04160001). 기간은 최근 3개월·00년월일 형식 자동 적용 */
+/** 투자자매매동향 일별(행)인지 판별: 객체에 일자/순매수 관련 키가 있는지 */
+function isInvestorTradeRow(obj: unknown): boolean {
+  if (obj == null || typeof obj !== "object" || Array.isArray(obj)) return false;
+  const k = Object.keys(obj as Record<string, unknown>).join(" ").toLowerCase();
+  return /stck_bsop|bsop_dt|prsn_ntby|frgn_ntby|orgn_ntby|일자|순매수/.test(k);
+}
+
+/** 단일 KIS 응답 body에서 투자자매매동향 행 배열 추출 */
+function parseInvestorTradeDailyBody(raw: Record<string, unknown>): unknown[] {
+  let result: unknown[] = [];
+  const keysToTry = ["output", "output2", "output1"] as const;
+  for (const key of keysToTry) {
+    const val = raw[key];
+    if (Array.isArray(val)) {
+      if (val.length === 0) continue;
+      const first = val[0];
+      if (typeof first === "object" && first !== null && !Array.isArray(first) && isInvestorTradeRow(first)) {
+        result = val;
+        break;
+      }
+      continue;
+    }
+    if (val != null && typeof val === "object") {
+      const obj = val as Record<string, unknown>;
+      const values = Object.values(obj);
+      const allArrays = values.length > 0 && values.every((v) => Array.isArray(v));
+      const sameLength =
+        allArrays &&
+        (values as unknown[][]).every((arr) => (arr as unknown[]).length === (values[0] as unknown[]).length);
+      if (sameLength) {
+        result = transposeOutputToRows(obj);
+        break;
+      }
+      const rowArray = values.find(
+        (v) =>
+          Array.isArray(v) &&
+          v.length > 0 &&
+          typeof v[0] === "object" &&
+          v[0] !== null &&
+          !Array.isArray(v[0]) &&
+          isInvestorTradeRow(v[0])
+      );
+      if (rowArray) {
+        result = rowArray as unknown[];
+        break;
+      }
+    }
+  }
+  if (result.length === 0) {
+    const fallback = extractListFromKisBody(raw);
+    if (
+      Array.isArray(fallback) &&
+      fallback.length > 0 &&
+      typeof fallback[0] === "object" &&
+      fallback[0] !== null &&
+      !Array.isArray(fallback[0]) &&
+      isInvestorTradeRow(fallback[0])
+    )
+      result = fallback;
+  }
+  return result;
+}
+
+/** 일자 값을 8자리 YYYYMMDD로 정규화 (4자리 MMDD면 현재 연도 붙임 → 정렬 시 12/6가 12/28보다 앞에 오도록) */
+function normalizeRowDateKey(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length >= 8) return digits.slice(-8);
+  if (digits.length === 6) return `20${digits}`;
+  if (digits.length === 4) return `${new Date().getFullYear()}${digits}`;
+  return digits.padStart(8, "0");
+}
+
+/** 행에서 일자 키 값 추출 (8자리 YYYYMMDD로 통일하여 정렬 순서 보장) */
+function getRowDateKey(r: Record<string, unknown>): string {
+  const dateKeys = ["stck_bsop_date", "stck_bsop_dt", "일자", "date"];
+  for (const k of dateKeys) if (r[k] != null) return normalizeRowDateKey(String(r[k])) || "";
+  return "";
+}
+
+/** 매매동향·일별체결량 공통: 오늘 기준 최근 30일(일력) */
+const TRADING_TREND_DAYS = 30;
+
+/**
+ * FHPTJ04160001 스펙: FID_INPUT_DATE_1은 "해당일 조회" 단일일(YYYYMMDD). output2가 일별 배열.
+ * 일력 기준 -30일 ~ 오늘 구간만 일자별 API 호출 후 일자순 정렬.
+ */
 export async function getKisInvestorTradeDaily(
   code: string,
   _startDate?: string,
@@ -1014,18 +1289,57 @@ export async function getKisInvestorTradeDaily(
   if (!/^\d{6}$/.test(String(code).trim())) return [];
   const path = KIS_TR_PATH.FHPTJ04160001;
   if (!path) return [];
-  const { start, end } = getLast3MonthsKisDates();
-  const body = await kisGet(path, "FHPTJ04160001", String(code).trim(), {
-    FID_INPUT_DATE_1: start,
-    FID_INPUT_DATE_2: end,
-    FID_ORG_ADJ_PRC: process.env.KIS_ORG_ADJ_PRC ?? "0",
-    FID_ETC_CLS_CODE: process.env.KIS_ETC_CLS_CODE ?? "0",
-  });
-  if (!body) return [];
-  return extractListFromKisBody(body as Record<string, unknown>);
+  const codeStr = String(code).trim();
+
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - TRADING_TREND_DAYS);
+  const startYmd = dateToYmd(startDate);
+  const endYmd = dateToYmd(endDate);
+
+  const byDate: Record<string, Record<string, unknown>> = {};
+  for (let i = 0; i <= TRADING_TREND_DAYS; i++) {
+    const d = new Date(startDate);
+    d.setDate(d.getDate() + i);
+    const ymd = dateToYmd(d);
+    if (ymd > endYmd) break;
+    const body = await kisGet(path, "FHPTJ04160001", codeStr, {
+      FID_INPUT_DATE_1: ymd,
+      FID_ORG_ADJ_PRC: "",
+      FID_ETC_CLS_CODE: "1",
+    });
+    if (!body) continue;
+    const output2 = body.output2;
+    const rows = Array.isArray(output2) ? output2 : parseInvestorTradeDailyBody(body);
+    for (const row of rows) {
+      if (row == null || typeof row !== "object" || Array.isArray(row)) continue;
+      const key = getRowDateKey(row as Record<string, unknown>);
+      if (key && key >= startYmd && key <= endYmd && !byDate[key]) byDate[key] = row as Record<string, unknown>;
+    }
+  }
+  return Object.values(byDate).sort((a, b) => getRowDateKey(a).localeCompare(getRowDateKey(b)));
 }
 
-/** 종목별 일별 매수매도 체결량 (FHKST03010800). 기간은 최근 3개월·00년월일 형식 자동 적용 */
+/** 컬럼형 응답(키 → 배열)을 행 배열로 전치. 모든 값이 동일 길이 배열일 때만 적용 */
+function transposeOutputToRows(output: Record<string, unknown>): unknown[] {
+  const entries = Object.entries(output);
+  if (entries.length === 0) return [];
+  const firstArr = entries[0]![1];
+  if (!Array.isArray(firstArr)) return [];
+  const len = firstArr.length;
+  const rows: Record<string, unknown>[] = [];
+  for (let i = 0; i < len; i++) {
+    const row: Record<string, unknown> = {};
+    for (const [k, v] of entries) {
+      if (Array.isArray(v) && v.length === len) row[k] = v[i];
+      else row[k] = v;
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+/** 종목별 일별 매수매도 체결량 (FHKST03010800). 오늘~-30일(일력) 구간만 반환 */
 export async function getKisDailyTradeVolume(
   code: string,
   _startDate?: string,
@@ -1034,21 +1348,82 @@ export async function getKisDailyTradeVolume(
   if (!/^\d{6}$/.test(String(code).trim())) return [];
   const path = KIS_TR_PATH.FHKST03010800;
   if (!path) return [];
-  const { start, end } = getLast3MonthsKisDates();
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - TRADING_TREND_DAYS);
+  const startYmd = dateToYmd(startDate);
+  const endYmd = dateToYmd(endDate);
   const body = await kisGet(path, "FHKST03010800", String(code).trim(), {
-    FID_INPUT_DATE_1: start,
-    FID_INPUT_DATE_2: end,
+    FID_INPUT_DATE_1: toKisDate00(startDate),
+    FID_INPUT_DATE_2: toKisDate00(endDate),
     FID_COND_MRKT_DIV_CODE_1: process.env.KIS_COND_MRKT_DIV_CODE ?? "J",
     FID_INPUT_ISCD_1: String(code).trim(),
     FID_PERIOD_DIV_CODE: "D",
   });
   if (!body) return [];
-  const list = body.output ?? body.output2;
-  return Array.isArray(list) ? list : [];
+  const raw = body as Record<string, unknown>;
+  let result: unknown[] = [];
+  for (const key of ["output", "output2"] as const) {
+    const val = raw[key];
+    if (Array.isArray(val)) {
+      result = val;
+      break;
+    }
+    if (val != null && typeof val === "object") {
+      const obj = val as Record<string, unknown>;
+      const values = Object.values(obj);
+      const allArrays = values.length > 0 && values.every((v) => Array.isArray(v));
+      const sameLength =
+        allArrays &&
+        (values as unknown[][]).every((arr) => (arr as unknown[]).length === (values[0] as unknown[]).length);
+      if (sameLength) {
+        result = transposeOutputToRows(obj);
+        break;
+      }
+      result = extractListFromKisBody(raw);
+      break;
+    }
+  }
+  if (result.length === 0) result = extractListFromKisBody(raw);
+  result = result.filter((r) => {
+    if (r == null || typeof r !== "object" || Array.isArray(r)) return false;
+    const rowYmd = getRowDateKey(r as Record<string, unknown>);
+    return rowYmd >= startYmd && rowYmd <= endYmd;
+  });
+  return (result as Record<string, unknown>[]).sort((a, b) =>
+    getRowDateKey(a).localeCompare(getRowDateKey(b))
+  );
 }
 
-/** 투자의견 한 행에 있을 수 있는 KIS 필드명 (단일 객체 여부 판별용) */
-const OPINION_ROW_KEYS = ["mbcr_name", "broker_nm", "stck_opnn_txt", "opinion", "stck_tgpr", "target_price", "stck_anal_dt", "date", "증권사명", "의견", "목표가", "제시일"];
+/**
+ * 주식현재가 일자별 (FHKST01010400). API는 최근 30거래일 반환. 표시는 오늘-30일 ~ 오늘(일력) 구간만 필터.
+ */
+export async function getKisDailyPrice(code: string): Promise<unknown[]> {
+  if (!/^\d{6}$/.test(String(code).trim())) return [];
+  const path = KIS_TR_PATH.FHKST01010400;
+  if (!path) return [];
+  const body = await kisGet(path, "FHKST01010400", String(code).trim(), {
+    FID_COND_MRKT_DIV_CODE: "UN",
+    FID_PERIOD_DIV_CODE: "D",
+    FID_ORG_ADJ_PRC: "1",
+  });
+  if (!body) return [];
+  const output = body.output;
+  if (!Array.isArray(output)) return [];
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - TRADING_TREND_DAYS);
+  const startYmd = dateToYmd(startDate);
+  const endYmd = dateToYmd(endDate);
+  return output.filter((r) => {
+    if (r == null || typeof r !== "object" || Array.isArray(r)) return false;
+    const key = getRowDateKey(r as Record<string, unknown>);
+    return key >= startYmd && key <= endYmd;
+  });
+}
+
+/** 투자의견 한 행에 있을 수 있는 KIS 필드명 (단일 객체 여부 판별용). 스펙 188/189: invt_opnn, hts_goal_prc, stck_bsop_date, mbcr_name */
+const OPINION_ROW_KEYS = ["mbcr_name", "broker_nm", "invt_opnn", "hts_goal_prc", "stck_bsop_date", "stck_opnn_txt", "opinion", "stck_tgpr", "target_price", "stck_anal_dt", "date", "증권사명", "의견", "목표가", "제시일"];
 
 /** KIS 응답에서 배열 추출 (output/output2가 배열, 단일 객체, 또는 키별 객체 목록인 경우 대응) */
 function extractListFromKisBody(body: Record<string, unknown>): unknown[] {
@@ -1090,12 +1465,12 @@ export async function getInvestmentOpinion(stockCode: string): Promise<KisInvest
     const brokerName =
       r.mbcr_name ?? r.broker_nm ?? r.brokerName ?? r.증권사명 ?? r.mbcr_nm ?? r.orgn_nm;
     const opinion =
-      r.stck_opnn_txt ?? r.opinion ?? r.의견 ?? r.stck_opnn ?? r.opnn_txt ?? r.opnn;
+      r.invt_opnn ?? r.stck_opnn_txt ?? r.opinion ?? r.의견 ?? r.stck_opnn ?? r.opnn_txt ?? r.opnn;
     const targetPrice = parseNum(
-      (r.stck_tgpr ?? r.target_price ?? r.targetPrice ?? r.목표가 ?? r.stck_tgpr_prc ?? r.tgpr) as string | number
+      (r.hts_goal_prc ?? r.stck_tgpr ?? r.target_price ?? r.targetPrice ?? r.목표가 ?? r.stck_tgpr_prc ?? r.tgpr) as string | number
     );
     const date =
-      r.stck_anal_dt ?? r.date ?? r.제시일 ?? r.anal_dt ?? r.report_dt ?? r.rpt_dt;
+      r.stck_bsop_date ?? r.stck_anal_dt ?? r.date ?? r.제시일 ?? r.anal_dt ?? r.report_dt ?? r.rpt_dt;
     return {
       brokerName: brokerName != null ? String(brokerName) : undefined,
       opinion: opinion != null ? String(opinion) : undefined,
@@ -1109,14 +1484,16 @@ export async function getInvestmentOpinion(stockCode: string): Promise<KisInvest
   let tickerOpinion: KisTickerOpinion | null = null;
   if (tickerOut) {
     const tgPr = parseNum(
-      (tickerOut.stck_tgpr ?? tickerOut.target_price ?? tickerOut.목표가) as string | number
+      (tickerOut.hts_goal_prc ?? tickerOut.stck_tgpr ?? tickerOut.target_price ?? tickerOut.목표가) as string | number
     );
-    const dt = tickerOut.stck_anal_dt ?? tickerOut.date ?? tickerOut.제시일;
-    if (tgPr > 0 || dt) {
+    const dt = tickerOut.stck_bsop_date ?? tickerOut.stck_anal_dt ?? tickerOut.date ?? tickerOut.제시일;
+    const opnn = tickerOut.invt_opnn ?? tickerOut.stck_opnn_txt ?? tickerOut.opinion ?? tickerOut.의견;
+    if (tgPr > 0 || dt || opnn) {
       tickerOpinion = {
-        opinionName: "종목",
+        opinionName: opnn != null ? String(opnn) : "종목",
         targetPrice: tgPr > 0 ? tgPr : undefined,
         date: dt != null ? String(dt) : (dates.length > 0 ? dates.sort().reverse()[0] : undefined),
+        outlook: opnn != null ? String(opnn) : undefined,
       };
     }
   }

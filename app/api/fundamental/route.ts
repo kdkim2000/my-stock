@@ -13,6 +13,7 @@ import {
   getKisEstimatePerform,
   getKisInvestorTradeDaily,
   getKisDailyTradeVolume,
+  getKisDailyPrice,
 } from "@/lib/kis-api";
 import {
   getDartTrendOnly,
@@ -54,6 +55,8 @@ export interface FundamentalApiKis {
   estimatePerform: KisEstimatePerformData | null;
   investorTradeDaily: KisTradingTrendRow[];
   dailyTradeVolume: KisTradingTrendRow[];
+  /** 주식현재가 일자별 (최근 30거래일). stck_bsop_date, stck_oprc, stck_clpr, stck_hgpr, stck_lwpr */
+  dailyPrice: Record<string, unknown>[];
 }
 
 export interface FundamentalApiDart {
@@ -101,7 +104,7 @@ export async function GET(
       fundamentals = await getKisStockFundamentals(code, priceInfo?.stckPrpr);
     }
 
-    // KIS 투자자매매동향·일별체결량은 lib/kis-api에서 최근 3개월·00년월일 형식 자동 적용
+    // KIS 투자자매매동향·일별체결량은 lib/kis-api에서 최근 30일(일력) 기준, 주식현재가 일자별은 30거래일 수신 후 오늘-30~오늘 필터
     const [
       dartRest,
       balanceSheet,
@@ -113,6 +116,7 @@ export async function GET(
       estimatePerform,
       investorTradeDaily,
       dailyTradeVolume,
+      dailyPrice,
     ] = await Promise.all([
       dartTrend?.corpCode
         ? getDartPreliminaryAndDocument(dartTrend.corpCode)
@@ -126,6 +130,7 @@ export async function GET(
       getKisEstimatePerform(code),
       getKisInvestorTradeDaily(code),
       getKisDailyTradeVolume(code),
+      getKisDailyPrice(code),
     ]);
 
     const fromRatio = financialRatio
@@ -177,6 +182,7 @@ export async function GET(
         estimatePerform: estimatePerform ?? null,
         investorTradeDaily: Array.isArray(investorTradeDaily) ? (investorTradeDaily as KisTradingTrendRow[]) : [],
         dailyTradeVolume: Array.isArray(dailyTradeVolume) ? (dailyTradeVolume as KisTradingTrendRow[]) : [],
+        dailyPrice: Array.isArray(dailyPrice) ? (dailyPrice as Record<string, unknown>[]) : [],
       },
       dart: {
         multiYear: dartTrend?.multiYear ?? [],
