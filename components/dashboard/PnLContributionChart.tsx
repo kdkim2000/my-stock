@@ -40,21 +40,34 @@ export function PnLContributionChart() {
     return { chartData, lossPositions };
   }, [data?.positions]);
 
-  if (isPending) return <div className="text-muted-foreground">로딩 중...</div>;
-  if (error) return <div className="text-destructive">포지션 데이터를 불러올 수 없습니다.</div>;
+  if (isPending) {
+    return (
+      <div className="h-[280px] flex items-center justify-center text-muted-foreground text-sm">
+        로딩 중…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-destructive text-sm">
+        포지션 데이터를 불러올 수 없습니다.
+      </div>
+    );
+  }
 
   const hasPositions = (data?.positions ?? []).some((p) => p.quantity > 0);
-  if (!hasPositions)
+  if (!hasPositions) {
     return (
-      <div className="flex h-[280px] items-center justify-center text-muted-foreground">
+      <div className="flex h-[280px] items-center justify-center rounded-lg border border-dashed border-border bg-muted/10 text-muted-foreground text-sm">
         보유 종목이 없습니다.
       </div>
     );
+  }
 
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="font-medium mb-2">종목별 평가손익 (기여도)</h3>
+        <p className="text-sm font-medium text-muted-foreground mb-2">종목별 평가손익 (기여도)</p>
         <div className="h-[260px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
@@ -74,13 +87,13 @@ export function PnLContributionChart() {
                   if (!active || !payload?.[0]) return null;
                   const p = payload[0].payload;
                   return (
-                    <div className="rounded border bg-background px-3 py-2 text-sm shadow">
-                      <p className="font-medium">{p.ticker}</p>
-                      <p className={p.평가손익 >= 0 ? "text-profit" : "text-loss"}>
+                    <div className="rounded-lg border border-border/50 bg-card px-3 py-2 text-sm shadow-md">
+                      <p className="font-semibold text-foreground">{p.ticker}</p>
+                      <p className={`tabular-nums ${p.평가손익 >= 0 ? "text-profit" : "text-loss"}`}>
                         평가손익 {p.평가손익 >= 0 ? "+" : ""}
                         {p.평가손익?.toLocaleString()}원
                       </p>
-                      <p className="text-muted-foreground">수익률 {p.수익률?.toFixed(1)}%</p>
+                      <p className="text-muted-foreground text-xs mt-0.5">수익률 {p.수익률?.toFixed(1)}%</p>
                     </div>
                   );
                 }}
@@ -99,19 +112,19 @@ export function PnLContributionChart() {
       </div>
       {lossPositions.length > 0 && (
         <div>
-          <h3 className="font-medium mb-2 text-sm">손실 포지션 (손절·재평가 후보)</h3>
-          <div className="overflow-x-auto rounded border text-sm">
+          <p className="font-medium mb-2 text-sm text-muted-foreground">손실 포지션 (손절·재평가 후보)</p>
+          <div className="overflow-x-auto rounded-lg border border-border/50 text-sm">
             <table className="w-full">
               <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="p-2 text-left">종목</th>
-                  <th className="p-2 text-right">평가손익</th>
-                  <th className="p-2 text-right">수익률</th>
+                <tr className="border-b border-border/60 bg-muted/40">
+                  <th className="p-2 text-left text-xs font-medium text-muted-foreground">종목</th>
+                  <th className="p-2 text-right text-xs font-medium text-muted-foreground">평가손익</th>
+                  <th className="p-2 text-right text-xs font-medium text-muted-foreground">수익률</th>
                 </tr>
               </thead>
               <tbody>
                 {lossPositions.slice(0, 8).map((p) => (
-                  <tr key={p.ticker} className="border-b hover:bg-muted/30">
+                  <tr key={p.ticker} className="border-b border-border/40 hover:bg-muted/20 transition-colors">
                     <td className="p-2 font-medium">
                       <Link href={`/dashboard/ticker/${encodeURIComponent(p.ticker)}`} className="hover:underline">
                         {p.ticker}

@@ -53,18 +53,31 @@ export function PositionConcentrationChart() {
     return top;
   }, [data?.positions, data?.totalMarketValue]);
 
-  if (isPending) return <div className="text-muted-foreground">로딩 중...</div>;
-  if (error) return <div className="text-destructive">포지션 데이터를 불러올 수 없습니다.</div>;
-  if (chartData.length === 0)
+  if (isPending) {
     return (
-      <div className="flex h-[280px] items-center justify-center text-muted-foreground">
+      <div className="h-[280px] flex items-center justify-center text-muted-foreground text-sm">
+        로딩 중…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-destructive text-sm">
+        포지션 데이터를 불러올 수 없습니다.
+      </div>
+    );
+  }
+  if (chartData.length === 0) {
+    return (
+      <div className="flex h-[280px] items-center justify-center rounded-lg border border-dashed border-border bg-muted/10 text-muted-foreground text-sm">
         보유 종목이 없습니다.
       </div>
     );
+  }
 
   return (
     <div className="space-y-2">
-      <h3 className="font-medium">종목별 평가금액 비중</h3>
+      <p className="text-sm font-medium text-muted-foreground">종목별 평가금액 비중</p>
       <div className="h-[280px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
@@ -89,10 +102,10 @@ export function PositionConcentrationChart() {
                 if (!active || !payload?.[0]) return null;
                 const p = payload[0].payload;
                 return (
-                  <div className="rounded border bg-background px-3 py-2 text-sm shadow">
-                    <p className="font-medium">{p.ticker}</p>
-                    <p>비중 {p.비중?.toFixed(1)}%</p>
-                    <p className="text-muted-foreground">
+                  <div className="rounded-lg border border-border/50 bg-card px-3 py-2 text-sm shadow-md">
+                    <p className="font-semibold text-foreground">{p.ticker}</p>
+                    <p className="tabular-nums">비중 {p.비중?.toFixed(1)}%</p>
+                    <p className="text-muted-foreground text-xs mt-0.5">
                       평가금액 {Number(p.marketValue).toLocaleString()}원
                     </p>
                   </div>

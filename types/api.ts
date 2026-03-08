@@ -246,10 +246,14 @@ export interface TickerDetailInfo {
   investmentOpinion?: KisInvestmentOpinion | null;
 }
 
-/** POST /api/ai/trading-guide 요청 body */
+/** POST /api/ai/trading-guide 요청 body. context 전달 시 상세 정보·매매 일지를 서버 재조회 없이 사용 */
 export interface TradingGuideRequest {
   code: string;
   ticker?: string;
+  context?: {
+    detailSummary?: string;
+    journalEntries?: Array<{ Date: string; Type: string; Quantity: number; Price: number; Journal?: string }>;
+  };
 }
 
 /** POST /api/ai/trading-guide 성공 응답 */
