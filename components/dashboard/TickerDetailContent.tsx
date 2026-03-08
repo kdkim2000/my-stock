@@ -1241,7 +1241,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
                           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                           <XAxis type="number" tickFormatter={(v) => formatFundamentalNum(v)} dataKey="value" />
                           <YAxis type="category" dataKey="name" width={72} tick={{ fontSize: 11 }} />
-                          <Tooltip formatter={(v: number) => formatFundamentalNum(v)} labelFormatter={(name) => name} />
+                          <Tooltip formatter={(v: number | undefined) => formatFundamentalNum(v ?? 0)} labelFormatter={(name) => name} />
                           <Bar dataKey="value" name="금액" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
                         </BarChart>
                       </ResponsiveContainer>
@@ -1255,7 +1255,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
                           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                           <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                           <YAxis tickFormatter={(v) => formatFundamentalNum(v)} />
-                          <Tooltip formatter={(v: number) => formatFundamentalNum(v)} labelFormatter={(name) => name} />
+                          <Tooltip formatter={(v: number | undefined) => formatFundamentalNum(v ?? 0)} labelFormatter={(name) => name} />
                           <Bar dataKey="value" name="금액" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
                         </BarChart>
                       </ResponsiveContainer>
@@ -1314,7 +1314,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
                             <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11 }} />
                             <PolarRadiusAxis angle={90} tick={{ fontSize: 10 }} tickFormatter={(v) => String(v)} />
                             <Radar name="비율" dataKey="value" stroke="hsl(var(--chart-1))" fill="hsl(var(--chart-1))" fillOpacity={0.4} />
-                            <Tooltip formatter={(v: number) => `${v}%`} />
+                            <Tooltip formatter={(v: number | undefined) => v != null ? `${v}%` : ""} />
                           </RadarChart>
                         </ResponsiveContainer>
                       </div>
@@ -1327,7 +1327,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
                             <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                             <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-24} textAnchor="end" height={44} />
                             <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `${v}%`} />
-                            <Tooltip formatter={(v: number) => `${v}%`} />
+                            <Tooltip formatter={(v: number | undefined) => v != null ? `${v}%` : ""} />
                             <Bar dataKey="value" name="비율" fill="hsl(var(--chart-1))" radius={[4, 4, 0, 0]} />
                           </BarChart>
                         </ResponsiveContainer>
@@ -1341,7 +1341,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
                             <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                             <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-24} textAnchor="end" height={44} />
                             <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => (v >= 1e8 ? `${(v / 1e8).toFixed(0)}억` : v >= 1e4 ? `${(v / 1e4).toFixed(0)}만` : String(v))} />
-                            <Tooltip formatter={(v: number) => formatRatioVal(v)} />
+                            <Tooltip formatter={(v: number | undefined) => formatRatioVal(v)} />
                             <Bar dataKey="value" name="값" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} />
                           </BarChart>
                         </ResponsiveContainer>
@@ -1524,7 +1524,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
                             tickFormatter={(v) => (v >= 10000 ? `${(v / 10000).toFixed(0)}만` : v <= -10000 ? `${(v / 10000).toFixed(0)}만` : String(v))}
                           />
                           <Tooltip
-                            formatter={(value: number) => [value.toLocaleString("ko-KR"), ""]}
+                            formatter={(value: number | undefined) => [value != null ? value.toLocaleString("ko-KR") : "", ""]}
                             labelFormatter={(_, payload) => (payload?.[0]?.payload as { date?: string } | undefined)?.date ?? ""}
                           />
                           <Legend />
@@ -1550,7 +1550,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
                           <XAxis dataKey="dateLabel" tick={{ fontSize: 10 }} />
                           <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => (v >= 10000 ? `${(v / 10000).toFixed(0)}만` : String(v))} />
                           <Tooltip
-                            formatter={(value: number) => [value.toLocaleString("ko-KR"), ""]}
+                            formatter={(value: number | undefined) => [value != null ? value.toLocaleString("ko-KR") : "", ""]}
                             labelFormatter={(_, payload) => (payload?.[0]?.payload as { dateLabel?: string; date?: string } | undefined)?.dateLabel ?? payload?.[0]?.payload?.date ?? ""}
                           />
                           <Legend />
@@ -1991,7 +1991,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <button
             type="button"
-            onClick={requestAiGuide}
+            onClick={() => requestAiGuide()}
             disabled={!code || aiLoading}
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none transition-opacity"
           >
@@ -2066,7 +2066,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
             </ul>
             <button
               type="button"
-              onClick={requestAiGuide}
+              onClick={() => requestAiGuide()}
               disabled={!code}
               className="rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
