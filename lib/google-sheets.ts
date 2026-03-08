@@ -48,7 +48,9 @@ async function getAccessTokenFromServiceAccount(
   });
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Google OAuth2 token ${res.status}: ${err}`);
+    const msg = `Google OAuth2 token ${res.status}: ${err}`;
+    console.error("[Sheets] Service account token error:", msg);
+    throw new Error(msg);
   }
   const data = (await res.json()) as { access_token?: string };
   if (!data.access_token) throw new Error("Google OAuth2 response missing access_token");
@@ -139,7 +141,9 @@ async function sheetsValuesGet(
   const res = await fetch(url, { headers: sheetsHeaders(auth) });
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Sheets API ${res.status}: ${err}`);
+    const msg = `Sheets API ${res.status}: ${err}`;
+    console.error("[Sheets] values.get error:", msg);
+    throw new Error(msg);
   }
   return res.json();
 }

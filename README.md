@@ -21,7 +21,7 @@ npm run dev
 ## 배포 (Vercel)
 
 - 환경 변수는 Vercel 프로젝트 **Environment Variables**에 `.env.example` 기준으로 설정합니다.
-- **서버리스 함수 250MB 초과** 시: Environment Variables에 `VERCEL_ANALYZE_BUILD_OUTPUT=1`을 설정한 뒤 재배포하면 빌드 로그에 함수별 크기(MB)와 Large dependencies 목록이 출력됩니다. [가이드](https://vercel.com/guides/troubleshooting-function-250mb-limit)
+- **서버리스 함수 250MB 초과** 시: 제한은 uncompressed 250 MB(압축 시 약 50 MB)이며 설정 불가. Environment Variables에 `VERCEL_ANALYZE_BUILD_OUTPUT=1`을 넣고 재배포하면 빌드 로그에 함수별 크기(MB)와 **largest contributors** 목록이 출력되어 원인 파악에 활용할 수 있습니다. [가이드](https://vercel.com/guides/troubleshooting-function-250mb-limit)
 - 배포 후 검증: 대시보드 접속, 매매내역·Sheets 연동 API, DART 재무 API, KIS 시세/투자의견 등 호출이 정상인지 확인합니다.
 
 ## 기술 스택

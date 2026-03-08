@@ -4,6 +4,7 @@ const nextConfig = {
   serverExternalPackages: ["adm-zip"],
   outputFileTracingExcludes: {
     "/api/**": [
+      "./node_modules/googleapis/build/src/apis/!(sheets|oauth2)/**/*",
       "./node_modules/**/*.md",
       "./node_modules/**/README*",
       "./node_modules/**/CHANGELOG*",

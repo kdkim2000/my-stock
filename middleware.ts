@@ -1,23 +1,23 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-
-const COOKIE_NAME = "app_access";
+import { getToken } from "next-auth/jwt";
 
 export async function middleware(request: NextRequest) {
-  const secret = process.env.ACCESS_SECRET?.trim();
-  const cookie = request.cookies.get(COOKIE_NAME)?.value;
-
-  const isAuthenticated = !!secret && cookie === secret;
+  const token = await getToken({
+    req: request,
+    secret: process.env.AUTH_SECRET,
+  });
+  const isAuthenticated = !!token;
 
   if (!isAuthenticated) {
-    const isApi = request.nextUrl.pathname.startsWith("/api/");
-    const isAuthApi =
-      request.nextUrl.pathname === "/api/auth/simple-login" ||
-      request.nextUrl.pathname === "/api/auth/logout";
-    const isSignInPage = request.nextUrl.pathname === "/auth/signin";
+    const isAuthRoute =
+      request.nextUrl.pathname.startsWith("/api/auth/") ||
+      request.nextUrl.pathname === "/auth/signin";
 
-    if (isSignInPage || isAuthApi) return NextResponse.next();
-    if (isApi) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (isAuthRoute) return NextResponse.next();
+    if (request.nextUrl.pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const signIn = new URL("/auth/signin", request.url);
     signIn.searchParams.set("callbackUrl", request.nextUrl.pathname);

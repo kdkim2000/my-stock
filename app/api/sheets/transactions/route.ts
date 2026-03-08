@@ -7,8 +7,13 @@ export async function GET() {
     const transactions = await getTransactions();
     return NextResponse.json({ transactions });
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Failed to fetch transactions" }, { status: 503 });
+    const message = e instanceof Error ? e.message : "Failed to fetch transactions";
+    console.error("[Sheets] GET transactions failed:", message, e);
+    const isDev = process.env.NODE_ENV === "development";
+    return NextResponse.json(
+      { error: "Failed to fetch transactions", detail: isDev ? message : undefined },
+      { status: 503 }
+    );
   }
 }
 
