@@ -1,0 +1,96 @@
+# Vercel 250MB 서버리스 함수 용량 초과 해결
+
+Vercel 배포 시 `A Serverless Function has exceeded the unzipped maximum size of 250 MB` 오류가 발생. `node_modules` 전체 608MB 중 서버리스 함수에 불필요하게 포함되는 대형 모듈을 식별하고 제거합니다.
+
+## 분석 결과 — 용량 기여도 (상위 모듈)
+
+| 모듈 | 크기 | 사용처 | 서버리스 필요? |
+|------|------|--------|---------------|
+| `next` | 132MB | 프레임워크 | ✅ (자동 최적화) |
+| **`lucide-react`** | **35.3MB** | 16개 파일, ~20 아이콘 | ❌ 클라이언트 전용, 서버 불필요 |
+| **`openai`** | **7.2MB** | 1개 API Route | ⚠️ 일부만 필요 |
+| `recharts` | 6.1MB | 차트 컴포넌트 | ❌ 클라이언트 전용 |
+| `@tanstack` | 2.8MB | React Query | ❌ 클라이언트 전용 |
+| `react-markdown` | 0.1MB | AI 분석 렌더 | ❌ 클라이언트 전용 |
+
+> [!IMPORTANT]
+> **핵심 원인**: Next.js 파일 트레이싱이 `lucide-react` 전체(35.3MB)를 서버리스 번들에 포함시키고 있음.  
+> `lucide-react/dist/umd` (11.1MB) + `esm` (7.5MB) + `cjs` (6.2MB) 모두 트레이싱 대상.
+
+## Proposed Changes
+
+### [MODIFY] [next.config.mjs](file:///e:/apps/my-stock/next.config.mjs)
+
+`outputFileTracingExcludes`에 아래 패턴을 추가하여 서버리스 번들에서 불필요한 대형 모듈을 제외:
+
+```javascript
+outputFileTracingExcludes: {
+  "/api/**": [
+    // 기존 패턴 유지
+    "./node_modules/googleapis/build/src/apis/!(sheets|oauth2)/**/*",
+    "./node_modules/**/*.md",
+    "./node_modules/**/README*",
+    "./node_modules/**/CHANGELOG*",
+    "./node_modules/**/docs/**",
+    "./node_modules/**/test/**",
+    "./node_modules/**/tests/**",
+    "./node_modules/**/*.map",
+
+    // === 신규: 대형 클라이언트 전용 모듈 ===
+    // lucide-react: 35.3MB → 서버 렌더링에 불필요한 UMD/ESM 번들
+    "./node_modules/lucide-react/dist/umd/**",
+    "./node_modules/lucide-react/dist/esm/**",
+
+    // openai: 7.2MB → resources 하위 미사용 서비스 제외 (chat만 사용)
+    "./node_modules/openai/resources/!(chat|completions)*.{js,mjs,d.ts}",
+    "./node_modules/openai/resources/beta/**",
+    "./node_modules/openai/resources/fine_tuning/**",
+    "./node_modules/openai/resources/audio/**",
+    "./node_modules/openai/resources/images/**",
+    "./node_modules/openai/resources/moderations*",
+
+    // recharts: 6.1MB → 전체가 클라이언트 전용
+    "./node_modules/recharts/**",
+    "./node_modules/d3-*/**",
+    "./node_modules/victory-vendor/**",
+
+    // @tanstack/react-query: 2.8MB → 클라이언트 전용
+    "./node_modules/@tanstack/**",
+
+    // 기타 클라이언트 전용
+    "./node_modules/react-markdown/**",
+    "./node_modules/tailwindcss-animate/**",
+  ],
+  // 비-API 페이지에서도 UMD 제외
+  "/**": [
+    "./node_modules/lucide-react/dist/umd/**",
+    "./node_modules/**/*.map",
+  ],
+},
+```
+
+**예상 절감**: ~50+MB (lucide 24MB + openai 3MB + recharts 6MB + d3 + @tanstack 2.8MB)
+
+> [!WARNING]
+> `recharts`, `@tanstack/react-query` 등은 **클라이언트 컴포넌트**에서만 사용되므로 `/api/**` 경로에서 안전하게 제외 가능합니다. 단, 페이지 SSR에서 사용하는 경우 전체 제외(`/**`)는 적용하지 않습니다.
+
+## Verification Plan
+
+### Automated Tests
+
+1. **로컬 빌드 성공 확인**:
+   ```bash
+   npm run build
+   ```
+   빌드 에러 없이 완료되어야 함.
+
+2. **기존 단위 테스트 통과 확인**:
+   ```bash
+   cmd /c "node_modules\.bin\vitest.cmd run"
+   ```
+   3 test files, 10 tests 전부 pass.
+
+### Manual Verification
+
+1. **Vercel 배포 시 250MB 오류 해소 여부**: 변경 후 `git push`하여 Vercel에서 배포 성공 확인 (사용자가 직접 확인 필요)
+2. **로컬 `npm run dev` 정상 동작**: 종목 상세 페이지에서 아이콘·차트·AI 분석 기능 확인

@@ -6,6 +6,7 @@ import type {
   CumulativePnlPoint,
 } from "@/types/api";
 import { sortTransactionsByDate } from "./sort-transactions";
+import { PositionTracker } from "./position-tracker";
 
 /**
  * Tags/Journal 문자열에서 #태그 형태 추출 (중복 제거)
@@ -34,8 +35,6 @@ export function computeAnalysis(
   const byTicker: Record<
     string,
     {
-      buyQty: number;
-      buyValue: number;
       buyCount: number;
       totalBuyAmount: number;
       totalSellAmount: number;
@@ -47,13 +46,13 @@ export function computeAnalysis(
   > = {};
   const byTag: Record<string, { realizedPnL: number; sellCount: number; winCount: number }> = {};
 
+  const tracker = new PositionTracker();
+
   for (const row of sorted) {
     const t = row.Ticker?.trim() || "";
     if (!t) continue;
     if (!byTicker[t])
       byTicker[t] = {
-        buyQty: 0,
-        buyValue: 0,
         buyCount: 0,
         totalBuyAmount: 0,
         totalSellAmount: 0,
@@ -62,24 +61,21 @@ export function computeAnalysis(
         sellCount: 0,
         winCount: 0,
       };
+
+    const res = tracker.process(row);
+    if (!res) continue;
+
     const q = row.Quantity || 0;
     const price = row.Price || 0;
-    const fee = row.Fee || 0;
-    const tax = row.Tax || 0;
 
     if (row.Type === "매수") {
-      byTicker[t].buyQty += q;
-      byTicker[t].buyValue += price * q;
       byTicker[t].buyCount += 1;
       byTicker[t].totalBuyAmount += price * q;
     } else {
       const p = byTicker[t];
-      const costOfSold =
-        p.buyQty > 0 ? (p.buyValue * q) / p.buyQty : 0;
-      const sellRevenue = price * q - fee - tax;
-      const realized = sellRevenue - costOfSold;
+      const realized = res.realizedPnL ?? 0;
       p.realizedPnL += realized;
-      p.totalSellCost += costOfSold;
+      p.totalSellCost += res.costOfSold;
       p.totalSellAmount += price * q;
       p.sellCount += 1;
       if (realized >= 0) p.winCount += 1;
@@ -90,10 +86,6 @@ export function computeAnalysis(
         byTag[tag].sellCount += 1;
         if (realized >= 0) byTag[tag].winCount += 1;
       }
-      p.buyQty -= q;
-      p.buyValue -= costOfSold;
-      if (p.buyQty < 0) p.buyQty = 0;
-      if (p.buyValue < 0) p.buyValue = 0;
     }
   }
 
@@ -163,33 +155,16 @@ export function computeCumulativePnl(
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
 
-  const byTicker: Record<string, { buyQty: number; buyValue: number }> = {};
+  const tracker = new PositionTracker();
   const dailyRealized: Record<string, number> = {};
 
   for (const row of sorted) {
-    const t = row.Ticker?.trim() || "";
-    if (!t) continue;
-    if (!byTicker[t])
-      byTicker[t] = { buyQty: 0, buyValue: 0 };
-    const q = row.Quantity || 0;
-    const price = row.Price || 0;
-    const fee = row.Fee || 0;
-    const tax = row.Tax || 0;
+    const res = tracker.process(row);
+    if (!res) continue;
 
-    if (row.Type === "매수") {
-      byTicker[t].buyQty += q;
-      byTicker[t].buyValue += price * q;
-    } else {
-      const p = byTicker[t];
-      const costOfSold = p.buyQty > 0 ? (p.buyValue * q) / p.buyQty : 0;
-      const sellRevenue = price * q - fee - tax;
-      const realized = sellRevenue - costOfSold;
+    if (row.Type !== "매수" && res.realizedPnL !== null) {
       const dateKey = row.Date;
-      dailyRealized[dateKey] = (dailyRealized[dateKey] ?? 0) + realized;
-      p.buyQty -= q;
-      p.buyValue -= costOfSold;
-      if (p.buyQty < 0) p.buyQty = 0;
-      if (p.buyValue < 0) p.buyValue = 0;
+      dailyRealized[dateKey] = (dailyRealized[dateKey] ?? 0) + res.realizedPnL;
     }
   }
 
