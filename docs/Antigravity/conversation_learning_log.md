@@ -60,18 +60,31 @@
   - `outputFileTracingExcludes` 패턴을 정교하게 설계하여 `/api/**` 경로에서 클라이언트 전용 라이브러리 제거.
 - **검증**: `npm run build`를 실행하여 빌드 프로세스가 깨지지 않는지 확인하고, `vitest`를 통해 기존 기능의 회귀(Regression) 여부 확인.
 
+### 2.4 심층 분석 (Deep Analysis — 반전의 결과)
+- **현상**: 아이콘과 라이브러리를 제외했음에도 여전히 250MB를 초과하는 문제 발생.
+- **추론 과정 (Thinking Process)**:
+  - "보통은 `node_modules`가 문제지만, 이번에는 Vercel 빌드 로그를 끝까지 추적해봐야 한다."
+  - 빌드 로그 정밀 분석 결과: **`.next/cache/webpack` (346.77 MB)** 발견.
+  - **진단**: Next.js의 파일 트레이싱(File Tracing)이 빌드 시 생성된 내부 캐시까지 서버리스 함수 번들에 포함시키고 있었음.
+
+### 2.5 최종 해결 (Final Resolution)
+- **최적화 구현**: `next.config.mjs`의 `outputFileTracingExcludes`에 `./.next/cache/**` 패턴 추가.
+- **결과**: 번들 크기가 **349MB에서 ~3MB 수준으로 급감(99% 감소)**하며 배포 성공.
+
 ---
 
 ## 💡 AI의 접근 방식 (Agentic Approach Tips)
 
 1. **Top-down Analysis**: 전체 `node_modules` 용량(608MB)을 먼저 파악한 후, 큰 것부터 하나씩(Lucide → OpenAI → Recharts) 좁혀가며 분석함.
-2. **Context-aware Exclusions**: 무조건 빼는 것이 아니라, `recharts`는 클라이언트에서 필요하므로 `/api/**` 경로 번들링 시에만 빼는 정밀한(Fine-grained) 제어를 선택함.
-3. **Safety First**: 변경 사항 적용 전 `implementation_plan.md`를 통해 사용자 승인을 얻고, 적용 후에는 `npm run build`와 `test`를 강제 실행하여 배포 안정성을 확보함.
+2. **Log-driven Debugging**: 추측에 의존하지 않고 Vercel의 상세 빌드 로그(Large Dependencies 리스트)를 통해 **진짜 원인(Webpack Cache)**을 찾아냄.
+3. **Context-aware Exclusions**: 무조건 빼는 것이 아니라, `recharts`는 클라이언트에서 필요하므로 `/api/**` 경로 번들링 시에만 빼는 정밀한(Fine-grained) 제어를 선택함.
+4. **Safety First**: 변경 사항 적용 전 사용자 승인을 얻고, 적용 후에는 `npm run build`와 `test`를 강제 실행하여 배포 안정성을 확보함.
 
 ---
 
 ## 📝 주요 학습 포인트
 
 - **모듈화의 가치**: 거대 파일(God Component)을 쪼개면 용량 분석과 최적화가 훨씬 쉬워집니다.
-- **Bundling Optimization**: Next.js 15에서는 `outputFileTracingExcludes`를 통해 서버리스 함수의 Cold Start 속도와 배포 성공률을 획기적으로 개선할 수 있습니다.
+- **진짜 범인은 따로 있었다**: 서버리스 용량 문제는 `node_modules`뿐만 아니라 `.next/cache`와 같은 빌드 산출물에 의해서도 발생할 수 있습니다.
+- **Bundling Optimization**: Next.js의 `outputFileTracingExcludes`는 서버리스 함수의 Cold Start 속도와 배포 성공률을 제어하는 강력한 도구입니다.
 - **Test-Driven Refactoring**: 리팩토링 전후에 동일한 테스트를 성공시킴으로써 코드 구조는 바뀌어도 기능은 동일함을 증명했습니다.

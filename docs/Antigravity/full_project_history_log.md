@@ -50,9 +50,9 @@
 ### 3.2 Vercel 배포 최적화
 - **문제**: 250MB 제한으로 인한 배포 실패.
 - **AI의 추론 (Thinking)**:
-  - "Next.js의 파일 트래킹이 클라이언트 전용 라이브러리(Lucide, Recharts)를 서버 번들까지 끌고 들어가는 것이 원인이다."
-  - "`outputFileTracingExcludes`를 활용해 서버리스 함수에서 불필요한 50MB 이상의 자산을 거부(Pruning)해야 한다."
-- **결과**: `next.config.mjs` 수정 후 빌드 성공 및 배포 용량 안정화.
+  - "1차 분석 결과: `lucide-react`, `recharts` 등 클라이언트 모듈이 서버 번들에 포함됨 → `outputFileTracingExcludes`로 50MB 절감."
+  - "2차 심층 분석: Vercel 상세 로그 분석 결과, **`.next/cache/webpack` (346.77 MB)**이 모든 서버리스 함수에 포함되어 용량의 99%를 차지함을 발견."
+- **결과**: 빌드 캐시(`./.next/cache/**`)를 번들에서 제외하도록 `next.config.mjs` 최종 수정. 번들 크기가 **349MB에서 ~3MB 수준으로 급감**하며 해결.
 
 ---
 
