@@ -3,6 +3,8 @@ import { existsSync } from "fs";
 import os from "os";
 import path from "path";
 import { getBaseUrl } from "./config";
+import { readTokenFromSheets, writeTokenToSheets } from "./token-store";
+
 
 const EXPIRE_BUFFER_MS = 60 * 1000;
 const TOKEN_RETRY_AFTER_MS = 62 * 1000;
@@ -41,6 +43,16 @@ function getTokenCachePath(): string {
 }
 
 async function readTokenFromFile(): Promise<{ token: string; expiresAt: number } | { cooldownUntil: number } | null> {
+  // Vercel: 각 인스턴스마다 /tmp가 분리되므로 Google Sheets를 공유 저장소로 먼저 조회
+  if (process.env.VERCEL === "1") {
+    try {
+      const sheetEntry = await readTokenFromSheets();
+      if (sheetEntry) return sheetEntry;
+    } catch {
+      // Sheets 조회 실패 시 로컬 파일로 fallback
+    }
+  }
+
   const filePath = getTokenCachePath();
   if (!filePath) return null;
   try {
@@ -59,6 +71,11 @@ async function readTokenFromFile(): Promise<{ token: string; expiresAt: number }
 }
 
 async function writeTokenToFile(entry: TokenEntry | { cooldownUntil: number }): Promise<void> {
+  // Vercel: Google Sheets에도 동시 저장 (다른 인스턴스들이 공유할 수 있도록)
+  if (process.env.VERCEL === "1" && "token" in entry) {
+    writeTokenToSheets(entry).catch(() => { }); // 비동기, 실패 무시
+  }
+
   const filePath = getTokenCachePath();
   if (!filePath) return;
   try {
@@ -113,7 +130,7 @@ export function clearKisTokenCache(): void {
   gl.tokenPCooldownUntil = 0;
   const p = getTokenCachePath();
   if (p && existsSync(p)) {
-    unlink(p).catch(() => {});
+    unlink(p).catch(() => { });
   }
 }
 

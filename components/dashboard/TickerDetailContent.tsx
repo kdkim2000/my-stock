@@ -233,13 +233,20 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
     }
   }, [queryClient, tickerOrCode, code]);
 
-  /** AI 분석 결과 메모이제이션: 종목(code)별 캐시로 토큰 사용 최소화. 캐시 있으면 API 호출 생략 */
+  /** AI 분석 결과: 서버 캐시(Google Sheets) 우선 → 없으면 OpenAI 호출 */
+  const [aiForceRefresh, setAiForceRefresh] = useState(false);
   const aiGuideQuery = useQuery({
     queryKey: ["ai", "trading-guide", code],
     queryFn: async () => {
-      const body: { code: string; ticker: string; context?: { detailSummary: string; journalEntries: unknown[] } } = {
+      const body: {
+        code: string;
+        ticker: string;
+        force?: boolean;
+        context?: { detailSummary: string; journalEntries: unknown[] };
+      } = {
         code,
         ticker,
+        force: aiForceRefresh,
       };
       if (aiContext.detailSummary.trim()) {
         body.context = {
@@ -252,9 +259,11 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = (await res.json()) as { content?: string; error?: string };
+      const data = (await res.json()) as { content?: string; cachedAt?: string; error?: string };
       if (!res.ok) throw new Error(data.error ?? "요청 실패");
-      return { content: data.content ?? null };
+      // 요청 후 force 플래그 리셋
+      setAiForceRefresh(false);
+      return { content: data.content ?? null, cachedAt: data.cachedAt ?? null };
     },
     enabled: false,
     staleTime: 30 * 60 * 1000,
@@ -262,14 +271,16 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
   });
 
   const aiContent = aiGuideQuery.data?.content ?? null;
+  const aiCachedAt = aiGuideQuery.data?.cachedAt ?? null;
   const aiError = aiGuideQuery.error?.message ?? null;
   const aiLoading = aiGuideQuery.isFetching;
 
-  /** 캐시 있으면 재요청 생략(토큰 절약). "다시 분석"은 항상 재요청 */
+  /** 캐시 있으면 재요청 생략(토큰 절약). "다시 분석"은 force=true로 OpenAI 재호출 */
   const requestAiGuide = useCallback(
     (forceRefetch = false) => {
       if (!code) return;
-      if (!forceRefetch && aiGuideQuery.data != null) return; // 캐시 사용
+      if (!forceRefetch && aiGuideQuery.data != null) return; // 클라이언트 캐시 사용
+      setAiForceRefresh(false); // 일반 요청: 서버 캐시 우선
       void aiGuideQuery.refetch();
     },
     [code, aiGuideQuery.data, aiGuideQuery.refetch]
@@ -277,6 +288,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
 
   const requestAiGuideRefresh = useCallback(() => {
     if (!code) return;
+    setAiForceRefresh(true); // OpenAI 재호출 강제
     void aiGuideQuery.refetch();
   }, [code, aiGuideQuery.refetch]);
 
@@ -325,6 +337,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
         aiLoading={aiLoading}
         aiError={aiError}
         aiContent={aiContent}
+        aiCachedAt={aiCachedAt}
         code={code}
         requestAiGuide={requestAiGuide}
         requestAiGuideRefresh={requestAiGuideRefresh}

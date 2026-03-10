@@ -6,6 +6,7 @@ interface AiGuideSectionProps {
   aiLoading: boolean;
   aiError: string | null;
   aiContent: string | null;
+  aiCachedAt: string | null;
   code: string;
   requestAiGuide: () => void;
   requestAiGuideRefresh: () => void;
@@ -15,10 +16,20 @@ export function AiGuideSection({
   aiLoading,
   aiError,
   aiContent,
+  aiCachedAt,
   code,
   requestAiGuide,
   requestAiGuideRefresh,
 }: AiGuideSectionProps) {
+  const cachedDateStr = aiCachedAt
+    ? new Date(aiCachedAt).toLocaleString("ko-KR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    })
+    : null;
   return (
     <section
       id="section-ai-guide"
@@ -134,6 +145,13 @@ export function AiGuideSection({
           role="region"
           aria-label="AI 분석 결과"
         >
+          {cachedDateStr && (
+            <div className="flex items-center justify-end gap-1.5 px-4 pt-3 pb-0">
+              <span className="text-[10px] text-muted-foreground/70">
+                분석일시: {cachedDateStr}
+              </span>
+            </div>
+          )}
           <div className="max-h-[420px] overflow-y-auto p-4 sm:p-5">
             <div className="prose prose-sm dark:prose-invert max-w-none prose-headings:font-semibold prose-headings:text-foreground prose-h2:text-sm prose-h2:mt-4 prose-h2:mb-2 prose-h2:pb-1 prose-h2:border-b prose-h2:border-border/60 prose-p:text-muted-foreground prose-p:leading-relaxed prose-p:my-2 prose-ul:my-2 prose-li:my-0.5 prose-strong:text-foreground">
               <ReactMarkdown
