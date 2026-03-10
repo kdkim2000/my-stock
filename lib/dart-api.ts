@@ -18,12 +18,7 @@ let corpCodeMapCache: Record<string, string> | null = null;
 let corpCodeCacheTime = 0;
 const CORP_CODE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-function parseNum(s: unknown): number {
-  if (s == null || s === "") return 0;
-  const v = String(s).replace(/,/g, "");
-  const n = Number(v);
-  return Number.isNaN(n) ? 0 : n;
-}
+import { parseNum } from "./utils";
 
 /**
  * 종목코드(6자리) → DART corp_code(8자리). 목록은 ZIP+XML로 캐시.

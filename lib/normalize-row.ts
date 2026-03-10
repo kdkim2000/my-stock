@@ -1,15 +1,6 @@
 import type { SheetTransactionRow, RawSheetRow } from "@/types/sheet";
 
-/**
- * 셀 값을 숫자로 파싱. 이미 숫자면 그대로, 문자열이면 쉼표 제거 후 파싱 (시트 포맷 "40,200" 대응)
- */
-function parseNumber(v: string | number | undefined | null): number {
-  if (v === undefined || v === null || v === "") return 0;
-  if (typeof v === "number" && !Number.isNaN(v)) return v;
-  const s = String(v).replace(/,/g, "");
-  const n = Number(s);
-  return Number.isNaN(n) ? 0 : n;
-}
+import { parseNum } from "./utils";
 
 /** Google Sheets/Excel 날짜 serial(1899-12-30 기준 일수) → YYYY-MM-DD */
 function serialToDateString(serial: number): string {
@@ -45,10 +36,10 @@ export function normalizeRow(raw: RawSheetRow): SheetTransactionRow {
     Date: formatDateCell(raw[0]),
     Ticker: String(get(1, "")),
     Type: String(get(2, "매수")) as "매수" | "매도",
-    Quantity: parseNumber(raw[3]),
-    Price: parseNumber(raw[4]),
-    Fee: parseNumber(raw[5]),
-    Tax: parseNumber(raw[6]),
+    Quantity: parseNum(raw[3]),
+    Price: parseNum(raw[4]),
+    Fee: parseNum(raw[5]),
+    Tax: parseNum(raw[6]),
     Journal: String(get(7, "")),
     Tags: String(get(8, "")),
   };

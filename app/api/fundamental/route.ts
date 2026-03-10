@@ -30,11 +30,7 @@ import type {
   KisTradingTrendRow,
 } from "@/types/api";
 
-function parseNum(v: unknown): number {
-  if (v == null || v === "") return 0;
-  const n = Number(String(v).replace(/,/g, ""));
-  return Number.isNaN(n) ? 0 : n;
-}
+import { parseNum } from "@/lib/utils";
 
 export interface FundamentalApiKis {
   priceInfo: KisPriceInfo | null;

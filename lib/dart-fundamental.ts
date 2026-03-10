@@ -9,12 +9,7 @@ import {
   type DartAccountItem,
 } from "@/lib/dart-api";
 
-function parseNum(s: unknown): number {
-  if (s == null || s === "") return 0;
-  const v = String(s).replace(/,/g, "");
-  const n = Number(v);
-  return Number.isNaN(n) ? 0 : n;
-}
+import { parseNum } from "./utils";
 
 function amountFrom(item: DartAccountItem): number {
   const s = item.thstrm_amount ?? item.thstrm_q_amount ?? "";

@@ -3,6 +3,7 @@ import type { PortfolioSummaryResponse } from "@/types/api";
 import { sortTransactionsByDate } from "./sort-transactions";
 import { getTickerCodeMap } from "./ticker-mapping";
 import { getCurrentPrice } from "./kis-api";
+import { PositionTracker } from "./position-tracker";
 
 /**
  * ticker → KIS 6자리 종목코드. codeMap은 getTickerCodeMap()으로 조회(마스터 시트 → 집계 시트 → 하드코딩 fallback).
@@ -38,36 +39,20 @@ export function computePortfolioSummaryFromTransactions(
   transactions: SheetTransactionRow[]
 ): PortfolioSummaryResponse {
   const sorted = sortTransactionsByDate(transactions);
-  const byTicker: Record<string, { buyQty: number; buyValue: number }> = {};
+  const tracker = new PositionTracker();
 
   for (const row of sorted) {
-    const t = (row.Ticker || "").trim();
-    if (!t) continue;
-    if (!byTicker[t]) byTicker[t] = { buyQty: 0, buyValue: 0 };
-    const q = row.Quantity || 0;
-    const price = row.Price || 0;
-
-    if (row.Type === "매수") {
-      byTicker[t].buyQty += q;
-      byTicker[t].buyValue += price * q;
-    } else {
-      const p = byTicker[t];
-      const costOfSold = p.buyQty > 0 ? (p.buyValue * q) / p.buyQty : 0;
-      p.buyQty -= q;
-      p.buyValue -= costOfSold;
-      if (p.buyQty < 0) p.buyQty = 0;
-      if (p.buyValue < 0) p.buyValue = 0;
-    }
+    tracker.process(row);
   }
 
   let totalBuyAmount = 0;
   const positions: PortfolioSummaryResponse["positions"] = [];
 
-  for (const [ticker, p] of Object.entries(byTicker)) {
+  for (const p of tracker.getAllPositions()) {
     if (p.buyQty <= 0) continue;
     totalBuyAmount += p.buyValue;
     positions.push({
-      ticker,
+      ticker: p.ticker,
       quantity: p.buyQty,
       buyAmount: p.buyValue,
       marketValue: p.buyValue,
