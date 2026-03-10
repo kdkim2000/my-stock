@@ -6,10 +6,12 @@
 
 ## 📅 세션 개요
 - **일시**: 2026-03-11
-- **주제**: 프로젝트 리팩토링 평가 및 Vercel 배포 용량 최적화
+- **주제**: 리팩토링 평가 → Vercel 배포 최적화 → 서버리스 상태 영속화
 - **핵심 목표**: 
   1. 기존 리팩토링 성과 측정 및 체계적 문서화
   2. Vercel 서버리스 함수 250MB 제한 문제 해결
+  3. KIS 토큰의 서버리스 인스턴스 간 영속적 공유
+  4. AI 분석 결과의 종목별 캐싱으로 OpenAI 토큰 절약
 
 ---
 
@@ -73,12 +75,77 @@
 
 ---
 
+## 🔑 Case 3: KIS 토큰 서버리스 인스턴스 간 공유
+
+### 3.1 사용자 요청 (User Request)
+> Vercel에 배포했을 때 KIS 토큰이 하루 1번 갱신하면 되지만, 토큰을 저장하지 못해 계속 새로 발급을 시도한다. 토큰이 만료되었을 때만 재발급하도록 수정하라.
+
+### 3.2 추론 과정 (Thinking Process)
+- **문제 진단**: 기존 토큰 저장 전략은 3단계(`모듈 변수` → `globalThis` → `/tmp/kis-token.json`).
+  - "Vercel 서버리스 함수는 각 인스턴스마다 별도의 `/tmp` 디렉토리를 가진다. 인스턴스 A가 저장한 토큰 파일을 인스턴스 B는 읽지 못한다."
+  - "`globalThis`도 마찬가지로 인스턴스 간에는 공유가 안 된다."
+  - "결론: 인스턴스 외부의 **영속적 공유 저장소**가 필요하다."
+- **저장소 후보 평가**:
+  - Vercel KV (Upstash Redis): 별도 서비스 가입/결제 필요 → **부적합** (zero-dependency 목표)
+  - 환경변수 API: 런타임에 환경변수를 동적으로 갱신하는 것은 Vercel에서 비표준 → **부적합**
+  - **Google Sheets**: 이미 프로젝트에서 사용 중이므로 추가 의존성 없이 즉시 활용 가능 → **최적**
+
+### 3.3 실행 내용 (Action)
+- **신규 파일**: [token-store.ts](file:///e:/apps/my-stock/lib/kis/token-store.ts) — Google Sheets `_KIS_TOKEN_` 시트(A1=토큰, B1=만료시간)에 대한 read/write 함수.
+- **수정 파일**: [token.ts](file:///e:/apps/my-stock/lib/kis/token.ts) — Vercel 환경(`process.env.VERCEL === '1'`)인 경우:
+  - `readTokenFromFile()`: Sheets에서 먼저 조회 → 실패 시 로컬 파일 fallback
+  - `writeTokenToFile()`: 파일 저장과 동시에 Sheets에도 비동기 저장
+- **로컬 환경**: 기존 파일 캐시 동작 100% 유지.
+
+### 3.4 아키텍처
+
+```
+[인스턴스 A] ──write──→ 🟢 Google Sheets '_KIS_TOKEN_' A1:B1
+[인스턴스 B] ──read───→ 🟢 Google Sheets '_KIS_TOKEN_' A1:B1  ← 동일한 토큰!
+[인스턴스 C] ──read───→ 🟢 Google Sheets '_KIS_TOKEN_' A1:B1  ← 동일한 토큰!
+```
+
+---
+
+## 🤖 Case 4: AI 분석 결과 종목별 캐싱
+
+### 4.1 사용자 요청 (User Request)
+> OpenAI 분석 결과도 매번 리셋된다. 종목별 최종 분석결과를 Google Sheets에 보관하고, 새로 AI 분석을 실시할 때만 갱신하고, 나머지는 보관된 정보를 표시하고 싶다.
+
+### 4.2 추론 과정 (Thinking Process)
+- "Case 3에서 Google Sheets를 공유 저장소로 활용하는 패턴이 이미 검증되었다. 동일한 아키텍처를 확장하면 된다."
+- "클라이언트에서 **'AI 분석 요청'**(캐시 우선)과 **'다시 분석'**(OpenAI 강제 재호출)을 구별해야 한다."
+- "API 응답에 `cachedAt` 타임스탬프를 포함시켜 UI에서 분석 일시를 표시하면 사용자 경험이 좋아진다."
+
+### 4.3 실행 내용 (Action)
+
+| 파일 | 변경 내용 |
+|------|-----------|
+| [ai-cache.ts](file:///e:/apps/my-stock/lib/ai-cache.ts) | (신규) `_AI_CACHE_` 시트에 종목별 분석결과 read/write. 구조: `code(A) \| ticker(B) \| content(C) \| updatedAt(D)` |
+| [route.ts](file:///e:/apps/my-stock/app/api/ai/trading-guide/route.ts) | `force` 파라미터 추가. `false`→캐시 반환, `true`→OpenAI 재호출 후 캐시 갱신 |
+| [TickerDetailContent.tsx](file:///e:/apps/my-stock/components/dashboard/TickerDetailContent.tsx) | "다시 분석" 클릭 시 `force: true` 전달. `aiForceRefresh` state 관리 |
+| [ai-guide-section.tsx](file:///e:/apps/my-stock/components/dashboard/ticker-detail/sections/ai-guide-section.tsx) | `aiCachedAt` prop 추가. 분석 결과 상단에 "분석일시: YYYY.MM.DD HH:mm" 표시 |
+
+### 4.4 동작 흐름
+
+```
+[AI 분석 요청] → 서버: Sheets '_AI_CACHE_' 조회
+  ├── 캐시 있음 → 즉시 반환 (OpenAI 토큰 절약 ✅)
+  └── 캐시 없음 → OpenAI 호출 → Sheets에 저장 → 반환
+
+[다시 분석] → 서버: force=true → OpenAI 재호출 → Sheets 갱신 → 반환
+```
+
+---
+
 ## 💡 AI의 접근 방식 (Agentic Approach Tips)
 
 1. **Top-down Analysis**: 전체 `node_modules` 용량(608MB)을 먼저 파악한 후, 큰 것부터 하나씩(Lucide → OpenAI → Recharts) 좁혀가며 분석함.
 2. **Log-driven Debugging**: 추측에 의존하지 않고 Vercel의 상세 빌드 로그(Large Dependencies 리스트)를 통해 **진짜 원인(Webpack Cache)**을 찾아냄.
 3. **Context-aware Exclusions**: 무조건 빼는 것이 아니라, `recharts`는 클라이언트에서 필요하므로 `/api/**` 경로 번들링 시에만 빼는 정밀한(Fine-grained) 제어를 선택함.
-4. **Safety First**: 변경 사항 적용 전 사용자 승인을 얻고, 적용 후에는 `npm run build`와 `test`를 강제 실행하여 배포 안정성을 확보함.
+4. **Existing Infrastructure Reuse**: 새 서비스를 도입하지 않고, 이미 사용 중인 Google Sheets를 공유 영속 저장소로 재활용하여 zero-dependency 솔루션을 구현함.
+5. **Pattern Propagation**: Case 3에서 검증된 "Sheets를 KV처럼 사용" 패턴을 Case 4에서 즉시 확장 적용하여 개발 속도를 극대화함.
+6. **Safety First**: 모든 변경에 `npm run build` 검증을 수반하고, 실패 시 무시(catch + 무시)하는 방어적 코딩을 적용함.
 
 ---
 
@@ -87,4 +154,6 @@
 - **모듈화의 가치**: 거대 파일(God Component)을 쪼개면 용량 분석과 최적화가 훨씬 쉬워집니다.
 - **진짜 범인은 따로 있었다**: 서버리스 용량 문제는 `node_modules`뿐만 아니라 `.next/cache`와 같은 빌드 산출물에 의해서도 발생할 수 있습니다.
 - **Bundling Optimization**: Next.js의 `outputFileTracingExcludes`는 서버리스 함수의 Cold Start 속도와 배포 성공률을 제어하는 강력한 도구입니다.
+- **서버리스 ≠ 상태 없음**: Vercel 서버리스에서도 외부 저장소(Google Sheets)를 활용하면 인스턴스 간 상태 공유가 가능합니다. Redis나 KV가 없어도 됩니다.
+- **"Sheets as KV" 패턴**: Google Sheets의 특정 셀/행을 Key-Value 저장소처럼 활용하는 것은 소규모 프로젝트에서 매우 실용적인 패턴입니다 (토큰 캐시, AI 결과 캐시 등).
 - **Test-Driven Refactoring**: 리팩토링 전후에 동일한 테스트를 성공시킴으로써 코드 구조는 바뀌어도 기능은 동일함을 증명했습니다.
