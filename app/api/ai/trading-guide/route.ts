@@ -67,6 +67,7 @@ export async function POST(request: Request) {
     code?: string;
     ticker?: string;
     force?: boolean; // true: OpenAI 재호출 ("다시 분석"), false/없음: 캐시 우선
+    cacheOnly?: boolean; // true: 캐시가 없으면 OpenAI를 호출하지 않고 null 반환
     context?: {
       detailSummary?: string;
       journalEntries?: Array<{ Date: string; Type: string; Quantity: number; Price: number; Journal?: string }>;
@@ -98,6 +99,13 @@ export async function POST(request: Request) {
         return NextResponse.json({
           content: cached.content,
           cachedAt: cached.updatedAt,
+        });
+      }
+      // 캐시가 없는데 cacheOnly 모드인 경우 OpenAI 호출 없이 즉시 반환
+      if (body.cacheOnly === true) {
+        return NextResponse.json({
+          content: null,
+          cachedAt: null,
         });
       }
     }
