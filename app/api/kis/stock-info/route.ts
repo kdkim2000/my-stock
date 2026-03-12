@@ -18,7 +18,16 @@ function get52WeekDateRange(): { start: string; end: string } {
 function safeDecodeParam(value: string | null): string {
   if (value == null || value === "") return "";
   try {
-    return decodeURIComponent(value);
+    let decoded = decodeURIComponent(value);
+    // 이중 인코딩된 경우(예: %25ED...) 한 번 더 디코딩 시도
+    if (decoded.includes("%")) {
+      try {
+        decoded = decodeURIComponent(decoded);
+      } catch {
+        // ignore
+      }
+    }
+    return decoded;
   } catch {
     return value;
   }

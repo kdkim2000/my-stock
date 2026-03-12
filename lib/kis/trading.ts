@@ -114,25 +114,27 @@ export async function getKisInvestorTradeDaily(
   const endYmd = dateToYmd(endDate);
 
   const byDate: Record<string, Record<string, unknown>> = {};
-  for (let i = 0; i <= TRADING_TREND_DAYS; i++) {
-    const d = new Date(startDate);
-    d.setDate(d.getDate() + i);
-    const ymd = dateToYmd(d);
-    if (ymd > endYmd) break;
-    const body = await kisGet(path, "FHPTJ04160001", codeStr, {
-      FID_INPUT_DATE_1: ymd,
-      FID_ORG_ADJ_PRC: "",
-      FID_ETC_CLS_CODE: "1",
-    });
-    if (!body) continue;
+  
+  // FHPTJ04160001은 조회일자(FID_INPUT_DATE_1) 기준 과거 데이터를 리스트(output2)로 반환함.
+  // 루프를 돌 필요 없이 한 번만 호출하면 됨.
+  const body = await kisGet(path, "FHPTJ04160001", codeStr, {
+    FID_INPUT_DATE_1: endYmd,
+    FID_ORG_ADJ_PRC: "",
+    FID_ETC_CLS_CODE: "1",
+  });
+  
+  if (body) {
     const output2 = body.output2;
     const rows = Array.isArray(output2) ? output2 : parseInvestorTradeDailyBody(body);
     for (const row of rows) {
       if (row == null || typeof row !== "object" || Array.isArray(row)) continue;
       const key = getRowDateKey(row as Record<string, unknown>);
-      if (key && key >= startYmd && key <= endYmd && !byDate[key]) byDate[key] = row as Record<string, unknown>;
+      if (key && key >= startYmd && key <= endYmd && !byDate[key]) {
+        byDate[key] = row as Record<string, unknown>;
+      }
     }
   }
+  
   return Object.values(byDate).sort((a, b) => getRowDateKey(a).localeCompare(getRowDateKey(b)));
 }
 

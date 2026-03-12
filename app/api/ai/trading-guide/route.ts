@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { readAiCache, writeAiCache } from "@/lib/ai-cache";
 import { getPriceInfo, getKisFinancialRatio, getInvestmentOpinion, getDailyChart } from "@/lib/kis-api";
 import { getDartTrendOnly } from "@/lib/dart-fundamental";
 import { getTechnicalIndicators } from "@/lib/indicators";
@@ -65,6 +66,8 @@ export async function POST(request: Request) {
   let body: {
     code?: string;
     ticker?: string;
+    force?: boolean; // true: OpenAI 재호출 ("다시 분석"), false/없음: 캐시 우선
+    cacheOnly?: boolean; // true: 캐시가 없으면 OpenAI를 호출하지 않고 null 반환
     context?: {
       detailSummary?: string;
       journalEntries?: Array<{ Date: string; Type: string; Quantity: number; Price: number; Journal?: string }>;
@@ -85,9 +88,27 @@ export async function POST(request: Request) {
   }
 
   const displayTicker = body.ticker?.trim() || code;
+  const forceRefresh = body.force === true;
   const useClientContext = Boolean(body.context?.detailSummary?.trim());
 
   try {
+    // 캐시 우선: force가 아니면 Google Sheets에서 기존 결과 반환
+    if (!forceRefresh) {
+      const cached = await readAiCache(code);
+      if (cached && cached.content) {
+        return NextResponse.json({
+          content: cached.content,
+          cachedAt: cached.updatedAt,
+        });
+      }
+      // 캐시가 없는데 cacheOnly 모드인 경우 OpenAI 호출 없이 즉시 반환
+      if (body.cacheOnly === true) {
+        return NextResponse.json({
+          content: null,
+          cachedAt: null,
+        });
+      }
+    }
     let userPayload: string;
     let journalText: string;
 
@@ -98,17 +119,17 @@ export async function POST(request: Request) {
       journalText =
         Array.isArray(clientJournal) && clientJournal.length > 0
           ? formatJournalForPrompt(
-              clientJournal
-                .map((e) => ({
-                  Date: String(e.Date ?? ""),
-                  Type: String(e.Type ?? ""),
-                  Quantity: Number(e.Quantity) || 0,
-                  Price: Number(e.Price) || 0,
-                  Journal: e.Journal != null ? String(e.Journal) : undefined,
-                }))
-                .sort((a, b) => String(b.Date).localeCompare(String(a.Date)))
-                .slice(0, 30)
-            )
+            clientJournal
+              .map((e) => ({
+                Date: String(e.Date ?? ""),
+                Type: String(e.Type ?? ""),
+                Quantity: Number(e.Quantity) || 0,
+                Price: Number(e.Price) || 0,
+                Journal: e.Journal != null ? String(e.Journal) : undefined,
+              }))
+              .sort((a, b) => String(b.Date).localeCompare(String(a.Date)))
+              .slice(0, 30)
+          )
           : "최근 매매 일지: 없음";
       userPayload = [base, `[최근 매매 일지]\n${journalText}`].join("\n\n");
     } else {
@@ -247,7 +268,10 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ content });
+    // Google Sheets에 분석결과 캐싱 (비동기, 실패 무시)
+    writeAiCache(code, displayTicker, content).catch(() => { });
+
+    return NextResponse.json({ content, cachedAt: new Date().toISOString() });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Unknown error";
     console.error("[AI trading-guide] error:", e);

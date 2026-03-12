@@ -3,6 +3,8 @@ import { existsSync } from "fs";
 import os from "os";
 import path from "path";
 import { getBaseUrl } from "./config";
+import { readTokenFromSheets, writeTokenToSheets } from "./token-store";
+
 
 const EXPIRE_BUFFER_MS = 60 * 1000;
 const TOKEN_RETRY_AFTER_MS = 62 * 1000;
@@ -41,6 +43,14 @@ function getTokenCachePath(): string {
 }
 
 async function readTokenFromFile(): Promise<{ token: string; expiresAt: number } | { cooldownUntil: number } | null> {
+  // Google Sheets를 공유 저장소로 먼저 조회 (Vercel·로컬 공통)
+  try {
+    const sheetEntry = await readTokenFromSheets();
+    if (sheetEntry) return sheetEntry;
+  } catch {
+    // Sheets 조회 실패 시 로컬 파일로 fallback
+  }
+
   const filePath = getTokenCachePath();
   if (!filePath) return null;
   try {
@@ -59,6 +69,13 @@ async function readTokenFromFile(): Promise<{ token: string; expiresAt: number }
 }
 
 async function writeTokenToFile(entry: TokenEntry | { cooldownUntil: number }): Promise<void> {
+  // Google Sheets에도 동시 저장 (Vercel·로컬 공통)
+  if ("token" in entry) {
+    writeTokenToSheets(entry).catch((err) => {
+      console.warn("[KIS] Google Sheets 토큰 저장 실패:", err);
+    });
+  }
+
   const filePath = getTokenCachePath();
   if (!filePath) return;
   try {
@@ -113,7 +130,7 @@ export function clearKisTokenCache(): void {
   gl.tokenPCooldownUntil = 0;
   const p = getTokenCachePath();
   if (p && existsSync(p)) {
-    unlink(p).catch(() => {});
+    unlink(p).catch(() => { });
   }
 }
 
@@ -128,7 +145,8 @@ export function isKisTokenExpiredResponse(bodyText: string): boolean {
 
 function parseExpiresAt(expiredStr: string): number {
   const s = expiredStr.replace(" ", "T").trim();
-  const iso = s.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(s) ? s : `${s}Z`;
+  // KIS API는 KST(한국시간)를 반환하므로 Z 대신 +09:00을 붙여 명시함
+  const iso = s.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(s) ? s : `${s}+09:00`;
   const d = new Date(iso);
   return d.getTime() - EXPIRE_BUFFER_MS;
 }
