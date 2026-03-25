@@ -8,7 +8,22 @@ interface EstimateSectionProps {
 }
 
 export function EstimateSection({ fundamentalData }: EstimateSectionProps) {
-  if (!fundamentalData.kis) return null;
+  // fundamental 로딩 중이거나 추정실적이 아직 미도착한 경우 스켈레톤 표시
+  if (fundamentalData.isPending || !fundamentalData.kis) {
+    return (
+      <section id="section-estimate-kis" className="rounded-2xl border border-border/50 bg-card p-6 scroll-mt-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-foreground mb-5 flex items-center gap-2">
+          <Table2 className="w-4 h-4 shrink-0 text-muted-foreground" />
+          추정실적 (KIS)
+        </h2>
+        <div className="animate-pulse space-y-3">
+          <div className="h-4 bg-muted rounded w-1/3" />
+          <div className="h-4 bg-muted rounded w-1/2" />
+          <div className="h-4 bg-muted rounded w-2/5" />
+        </div>
+      </section>
+    );
+  }
   return (
     <section id="section-estimate-kis" className="rounded-2xl border border-border/50 bg-card p-6 scroll-mt-6 shadow-sm">
       <h2 className="text-lg font-semibold text-foreground mb-5 flex items-center gap-2">

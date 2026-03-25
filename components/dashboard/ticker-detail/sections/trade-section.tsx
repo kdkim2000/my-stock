@@ -25,7 +25,17 @@ interface TradeSectionProps {
 }
 
 export function TradeSection({ fundamentalData }: TradeSectionProps) {
-  if (fundamentalData.isPending) {
+  const kis = fundamentalData.kis;
+  const daily = kis?.investorTradeDaily ?? [];
+  const vol = kis?.dailyTradeVolume ?? [];
+  const dailyPrice = kis?.dailyPrice ?? [];
+  const hasDaily = Array.isArray(daily) && daily.length > 0;
+  const hasVol = Array.isArray(vol) && vol.length > 0;
+  const hasOhlc = Array.isArray(dailyPrice) && dailyPrice.length > 0;
+  const hasAny = hasDaily || hasVol || hasOhlc;
+  // fundamental 로딩 중이거나 kis 자체가 없을 때 스켈레톤
+  const isLoading = fundamentalData.isPending || !kis;
+  if (isLoading) {
     return (
       <section id="section-trade-kis" className="rounded-2xl border border-border/50 bg-card p-6 scroll-mt-6 shadow-sm">
         <h2 className="text-lg font-semibold text-foreground mb-5 flex items-center gap-2">
@@ -36,14 +46,7 @@ export function TradeSection({ fundamentalData }: TradeSectionProps) {
       </section>
     );
   }
-  const kis = fundamentalData.kis;
-  const daily = kis?.investorTradeDaily ?? [];
-  const vol = kis?.dailyTradeVolume ?? [];
-  const dailyPrice = kis?.dailyPrice ?? [];
-  const hasDaily = Array.isArray(daily) && daily.length > 0;
-  const hasVol = Array.isArray(vol) && vol.length > 0;
-  const hasOhlc = Array.isArray(dailyPrice) && dailyPrice.length > 0;
-  const hasAny = hasDaily || hasVol || hasOhlc;
+
   return (
     <section id="section-trade-kis" className="rounded-2xl border border-border/50 bg-card p-6 scroll-mt-6 shadow-sm">
       <h2 className="text-lg font-semibold text-foreground mb-5 flex items-center gap-2">

@@ -5,13 +5,6 @@ import {
   getKisBalanceSheet,
   getKisIncomeStatement,
   getKisFinancialRatio,
-  getKisProfitRatio,
-  getKisStabilityRatio,
-  getKisGrowthRatio,
-  getKisOtherMajorRatios,
-  getKisEstimatePerform,
-  getKisInvestorTradeDaily,
-  getKisDailyTradeVolume,
   getKisDailyPrice,
 } from "@/lib/kis-api";
 import {
@@ -43,12 +36,19 @@ export interface FundamentalApiKis {
   balanceSheet: KisBalanceSheetData | null;
   incomeStatement: KisIncomeStatementData | null;
   financialRatio: KisRatioData | null;
+  /** @deprecated 별도 /api/fundamental/ratios 에서 조회하세요 */
   profitRatio: KisRatioData | null;
+  /** @deprecated 별도 /api/fundamental/ratios 에서 조회하세요 */
   stabilityRatio: KisRatioData | null;
+  /** @deprecated 별도 /api/fundamental/ratios 에서 조회하세요 */
   growthRatio: KisRatioData | null;
+  /** @deprecated 별도 /api/fundamental/ratios 에서 조회하세요 */
   otherMajorRatios: KisRatioData | null;
+  /** @deprecated 별도 /api/fundamental/estimate 에서 조회하세요 */
   estimatePerform: KisEstimatePerformData | null;
+  /** @deprecated 별도 /api/fundamental/trading 에서 조회하세요 */
   investorTradeDaily: KisTradingTrendRow[];
+  /** @deprecated 별도 /api/fundamental/trading 에서 조회하세요 */
   dailyTradeVolume: KisTradingTrendRow[];
   /** 주식현재가 일자별 (최근 30거래일). stck_bsop_date, stck_oprc, stck_clpr, stck_hgpr, stck_lwpr */
   dailyPrice: Record<string, unknown>[];
@@ -71,8 +71,16 @@ const SWR_SEC = 600;
 
 /**
  * GET /api/fundamental?code=066570&revalidate=1
- * KIS(현재가·종목정보·재무·비율·추정실적·매매동향·일봉 등)와 DART(5개년 트렌드·잠정실적 링크·공시 문서)를 먼저 조회한 뒤,
- * 투자의견은 응답 지연이 크므로 마지막에 단독 조회합니다.
+ *
+ * ★ 성능 개선 (방안 2):
+ *   이 엔드포인트는 핵심 데이터(시세·재무요약·DART 트렌드·일봉)만 반환합니다.
+ *   아래 느린 지표는 별도 엔드포인트로 분리하여 클라이언트에서 독립적으로 로딩합니다:
+ *     - 비율(수익성·안정성·성장성·기타): GET /api/fundamental/ratios
+ *     - 추정실적:                        GET /api/fundamental/estimate
+ *     - 매매동향:                        GET /api/fundamental/trading
+ *
+ * 기존 호환성을 위해 profitRatio, stabilityRatio, growthRatio, otherMajorRatios,
+ * estimatePerform, investorTradeDaily, dailyTradeVolume 필드는 null/빈 배열로 유지합니다.
  */
 export async function GET(
   request: Request
@@ -87,31 +95,25 @@ export async function GET(
   }
 
   try {
-    // 1단계: 가격·DART 트렌드 먼저 (투자의견 제외 — 지연이 크므로 후순위로 조회)
+    // 1단계: 가격·DART 트렌드 병렬 조회
     const [priceInfo, dartTrend] = await Promise.all([
       getPriceInfo(code),
       getDartTrendOnly(code),
     ]);
 
-    // 재무비율 1회 호출로 per/pbr/eps/bps + financialRatio 채움. 중복 호출 제거(EGW00201 완화).
+    // 재무비율 1회 호출로 per/pbr/eps/bps + financialRatio 채움
     const financialRatio = await getKisFinancialRatio(code);
     let fundamentals: Awaited<ReturnType<typeof getKisStockFundamentals>> = null;
     if (!financialRatio || (parseNum(financialRatio.per ?? financialRatio.stck_per) <= 0 && parseNum(financialRatio.pbr ?? financialRatio.stck_pbr) <= 0)) {
       fundamentals = await getKisStockFundamentals(code, priceInfo?.stckPrpr);
     }
 
-    // KIS 투자자매매동향·일별체결량은 lib/kis-api에서 최근 30일(일력) 기준, 주식현재가 일자별은 30거래일 수신 후 오늘-30~오늘 필터
+    // 2단계: 재무요약 + DART 잠정/공시 + 일봉 — 병렬 조회
+    // ★ 비율(4개)·추정실적·매매동향은 별도 엔드포인트로 분리되어 여기서는 제외합니다.
     const [
       dartRest,
       balanceSheet,
       incomeStatement,
-      profitRatio,
-      stabilityRatio,
-      growthRatio,
-      otherMajorRatios,
-      estimatePerform,
-      investorTradeDaily,
-      dailyTradeVolume,
       dailyPrice,
     ] = await Promise.all([
       dartTrend?.corpCode
@@ -119,17 +121,10 @@ export async function GET(
         : Promise.resolve({ preliminaryLink: null as string | null, document: {} as DartDocumentSections }),
       getKisBalanceSheet(code),
       getKisIncomeStatement(code),
-      getKisProfitRatio(code),
-      getKisStabilityRatio(code),
-      getKisGrowthRatio(code),
-      getKisOtherMajorRatios(code),
-      getKisEstimatePerform(code),
-      getKisInvestorTradeDaily(code),
-      getKisDailyTradeVolume(code),
       getKisDailyPrice(code),
     ]);
 
-    // 투자의견은 클라이언트에서 /api/kis/opinion 으로 별도 조회 (응답 지연이 커서 본 API에서는 제외)
+    // 투자의견은 클라이언트에서 /api/kis/opinion 으로 별도 조회
     const fromRatio = financialRatio
       ? {
           per: parseNum(financialRatio.per ?? financialRatio.prdy_per ?? financialRatio.stck_per),
@@ -148,16 +143,6 @@ export async function GET(
     if (eps != null && eps <= 0) eps = null;
     if (bps != null && bps <= 0) bps = null;
 
-    const forwardEps = estimatePerform
-      ? (typeof estimatePerform.eps === "number"
-          ? estimatePerform.eps
-          : typeof estimatePerform.fwd_eps === "number"
-            ? estimatePerform.fwd_eps
-            : typeof estimatePerform.forward_eps === "number"
-              ? estimatePerform.forward_eps
-              : undefined) ?? undefined
-      : undefined;
-
     const body: FundamentalApiResponse = {
       code,
       kis: {
@@ -166,18 +151,19 @@ export async function GET(
         pbr,
         eps,
         bps,
-        forwardEps: forwardEps ?? undefined,
+        forwardEps: undefined,
         opinion: { tickerOpinion: null, brokerOpinions: [] },
         balanceSheet: balanceSheet ?? null,
         incomeStatement: incomeStatement ?? null,
         financialRatio: financialRatio ?? null,
-        profitRatio: profitRatio ?? null,
-        stabilityRatio: stabilityRatio ?? null,
-        growthRatio: growthRatio ?? null,
-        otherMajorRatios: otherMajorRatios ?? null,
-        estimatePerform: estimatePerform ?? null,
-        investorTradeDaily: Array.isArray(investorTradeDaily) ? (investorTradeDaily as KisTradingTrendRow[]) : [],
-        dailyTradeVolume: Array.isArray(dailyTradeVolume) ? (dailyTradeVolume as KisTradingTrendRow[]) : [],
+        // 분리된 엔드포인트로 이관 — 하위 호환성을 위해 null/빈 배열 유지
+        profitRatio: null,
+        stabilityRatio: null,
+        growthRatio: null,
+        otherMajorRatios: null,
+        estimatePerform: null,
+        investorTradeDaily: [],
+        dailyTradeVolume: [],
         dailyPrice: Array.isArray(dailyPrice) ? (dailyPrice as Record<string, unknown>[]) : [],
       },
       dart: {

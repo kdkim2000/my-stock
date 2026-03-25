@@ -29,7 +29,10 @@ interface RatioSectionProps {
 }
 
 export function RatioSection({ fundamentalData }: RatioSectionProps) {
-  if (fundamentalData.isPending) {
+  const kis = fundamentalData.kis;
+  // fundamental 로딩 중 이거나 비율 데이터가 아직 도착하지 않은 경우 스켈레톤 표시
+  const isLoading = fundamentalData.isPending || (!kis?.profitRatio && !kis?.stabilityRatio && !kis?.growthRatio && !kis?.otherMajorRatios && !kis?.financialRatio);
+  if (isLoading) {
     return (
       <section id="section-ratio-kis" className="rounded-2xl border border-border/50 bg-card p-6 scroll-mt-6 shadow-sm">
         <h2 className="text-lg font-semibold text-foreground mb-5 flex items-center gap-2">
@@ -40,7 +43,6 @@ export function RatioSection({ fundamentalData }: RatioSectionProps) {
       </section>
     );
   }
-  const kis = fundamentalData.kis;
   const finRatio = (kis?.financialRatio ?? null) as Record<string, unknown> | null;
   const allRatioRecs = [
     finRatio,
