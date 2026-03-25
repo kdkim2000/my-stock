@@ -1,13 +1,19 @@
 /**
- * KIS API 동시성 제어 — 세마포어 방식
+ * KIS API 동시성 제어 — 세마포어 방식 (버그 수정版)
  *
- * 기존 글로벌 400ms throttle 은 Promise.all() 내부에서도 모든 호출을 직렬화하여
- * 14~20개 호출 × 400ms = 5.6~8초 이상의 대기를 유발했습니다.
+ * ★ 수정 내용 (버그 원인):
+ *   기존 구현에서 큐 대기 후 재개 시 sem.running++ 을 실행했는데,
+ *   releaseKisThrottle() 이 next() 호출 시 running 을 감소시키지 않아
+ *   매 슬롯 양도마다 running 이 +1씩 증가하는 누수가 발생했습니다.
+ *   결과: concurrency=5 → 실제로는 제한 없이 모든 요청이 동시 실행됨.
  *
- * 개선: 최대 KIS_CONCURRENCY 개 동시 요청을 허용하는 세마포어로 교체합니다.
- * - KIS API 권고: 초당 최대 10~20회. 기본값 5로 설정해 안전 마진 확보.
- * - 동시 5개 허용 시: 14호출 → ceil(14/5) × ~300ms ≈ 0.9초 (기존 5.6초 대비 ~6배 향상)
- * - 환경변수 KIS_CONCURRENCY 로 조정 가능 (0 이하 = 제한 없음)
+ * 올바른 세마포어 동작:
+ *   - 즉시 획득(running < KIS_CONCURRENCY): running++
+ *   - 큐 대기 후 획득(슬롯 직접 양도):      running 변경 없음
+ *   - 해제(대기자 있음): running 변경 없음, next() 로 슬롯 직접 양도
+ *   - 해제(대기자 없음): running--
+ *
+ * 환경변수 KIS_CONCURRENCY 로 조정 가능 (기본값 5, 0 이하 = 제한 없음)
  */
 const KIS_CONCURRENCY = Math.max(0, Number(process.env.KIS_CONCURRENCY) || 5);
 
@@ -27,11 +33,13 @@ function getSemaphore(): SemaphoreState {
 }
 
 /**
- * 세마포어 획득: 동시 실행 수가 KIS_CONCURRENCY 미만이면 즉시 진행,
- * 초과면 대기열에 등록 후 슬롯이 해제될 때까지 대기합니다.
+ * 세마포어 획득:
+ *  - running < KIS_CONCURRENCY: running++ 후 즉시 반환
+ *  - running >= KIS_CONCURRENCY: 큐에서 대기. 슬롯은 releaseKisThrottle() 이 직접 양도.
+ *    이 경우 running 은 변경하지 않음(슬롯 수 그대로 유지).
  */
 export async function waitKisThrottle(): Promise<void> {
-  if (KIS_CONCURRENCY <= 0) return; // 제한 없음
+  if (KIS_CONCURRENCY <= 0) return;
 
   const sem = getSemaphore();
   if (sem.running < KIS_CONCURRENCY) {
@@ -39,16 +47,18 @@ export async function waitKisThrottle(): Promise<void> {
     return;
   }
 
-  // 슬롯이 없으면 큐에서 대기
+  // 슬롯 부족 → 큐에서 대기. 슬롯은 releaseKisThrottle이 양도하므로 running은 건드리지 않음.
   await new Promise<void>((resolve) => {
     sem.queue.push(resolve);
   });
-  sem.running++;
+  // ★ sem.running++ 하지 않음 — releaseKisThrottle에서 running을 감소시키지 않고
+  //    슬롯을 직접 양도했기 때문에 running 값은 유지된 상태.
 }
 
 /**
- * 세마포어 해제: 다음 대기자에게 슬롯을 양도합니다.
- * kisGet() 완료 후 반드시 호출해야 합니다.
+ * 세마포어 해제:
+ *  - 대기자 있음: running 변경 없이 next() 로 슬롯 직접 양도
+ *  - 대기자 없음: running--
  */
 export function releaseKisThrottle(): void {
   if (KIS_CONCURRENCY <= 0) return;
@@ -56,11 +66,12 @@ export function releaseKisThrottle(): void {
   const sem = getSemaphore();
   const next = sem.queue.shift();
   if (next) {
-    next(); // 대기 중이던 호출 즉시 진행 (running 수는 유지)
+    // 슬롯을 대기자에게 직접 양도: running은 그대로 (1 out → 1 in)
+    next();
   } else {
     sem.running = Math.max(0, sem.running - 1);
   }
 }
 
-// 하위 호환: 기존 KIS_THROTTLE_MS export 유지 (외부 참조 코드 대비)
+// 하위 호환: 기존 KIS_THROTTLE_MS export 유지
 export const KIS_THROTTLE_MS = 0;

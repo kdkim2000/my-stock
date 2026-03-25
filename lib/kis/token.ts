@@ -104,6 +104,8 @@ async function writeTokenToFile(entry: TokenEntry | { cooldownUntil: number }): 
 let cachedToken: TokenEntry | null = null;
 let refreshPromise: Promise<string | null> | null = null;
 let tokenPCooldownUntil = 0;
+/** readTokenFromFile() 중복 호출 방지 싱글턴 */
+let fileReadPromise: Promise<{ token: string; expiresAt: number } | { cooldownUntil: number } | null> | null = null;
 
 function syncFromGlobalAndCheckExpired(): boolean {
   const gl = getGlobal();
@@ -123,6 +125,7 @@ export function isCachedTokenExpired(): boolean {
 export function clearKisTokenCache(): void {
   cachedToken = null;
   refreshPromise = null;
+  fileReadPromise = null;
   tokenPCooldownUntil = 0;
   const gl = getGlobal();
   gl.cachedToken = null;
@@ -161,9 +164,27 @@ export async function getAccessToken(): Promise<string | null> {
   tokenPCooldownUntil = gl.tokenPCooldownUntil;
   refreshPromise = gl.refreshPromise;
 
+  // 1단계: 인메모리 캐시 (가장 빠름)
   if (!syncFromGlobalAndCheckExpired()) return cachedToken!.token;
 
-  const fileEntry = await readTokenFromFile();
+  // 2단계: refreshPromise 가 진행 중이면 대기 (★ readTokenFromFile 보다 먼저 체크)
+  //   기존 코드는 readTokenFromFile() 후에 체크하여 12개 동시 호출이
+  //   모두 Sheets 읽기를 실행하는 경합이 발생했음.
+  if (refreshPromise) {
+    await refreshPromise;
+    gl.refreshPromise = null;
+    refreshPromise = null;
+    if (!syncFromGlobalAndCheckExpired()) return cachedToken!.token;
+    return getAccessToken();
+  }
+
+  // 3단계: 파일/Sheets 읽기 (fileReadPromise 싱글턴으로 중복 실행 방지)
+  if (!fileReadPromise) {
+    fileReadPromise = readTokenFromFile().finally(() => {
+      fileReadPromise = null;
+    });
+  }
+  const fileEntry = await fileReadPromise;
   if (fileEntry && "token" in fileEntry) {
     cachedToken = { token: fileEntry.token, expiresAt: fileEntry.expiresAt };
     gl.cachedToken = cachedToken;
@@ -172,14 +193,6 @@ export async function getAccessToken(): Promise<string | null> {
   if (fileEntry && "cooldownUntil" in fileEntry && fileEntry.cooldownUntil > Date.now()) {
     const waitMs = fileEntry.cooldownUntil - Date.now();
     await new Promise((r) => setTimeout(r, Math.min(waitMs, TOKEN_RETRY_AFTER_MS)));
-    return getAccessToken();
-  }
-
-  if (refreshPromise) {
-    await refreshPromise;
-    gl.refreshPromise = null;
-    refreshPromise = null;
-    if (!syncFromGlobalAndCheckExpired()) return cachedToken!.token;
     return getAccessToken();
   }
 

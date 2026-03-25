@@ -53,10 +53,19 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
     staleTime: STALE_TIME_DETAIL_MS,
   });
 
-  const code = stockInfoQuery.data?.code ?? "";
+  /**
+   * ★ Waterfall 제거: tickerOrCode가 6자리 코드면 stock-info 완료를 기다리지 않고
+   *   즉시 fundamental 쿼리를 시작합니다.
+   *   ticker(문자열)인 경우만 stock-info 응답에서 code를 얻어야 합니다.
+   */
+  const code = isCode
+    ? tickerOrCode
+    : (stockInfoQuery.data?.code ?? "");
+
   const fundamentalData = useFundamentalData(code, revalidateTrigger);
   /** 분리된 느린 지표(비율·추정실적·매매동향) — 독립적으로 로딩(방안 2) */
   const extended = useFundamentalExtended(code, revalidateTrigger);
+
 
   const indicatorsQuery = useQuery<TechnicalIndicatorsResponse>({
     queryKey: ["kis", "indicators", code ?? ""],

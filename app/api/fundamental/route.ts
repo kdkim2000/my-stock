@@ -95,34 +95,29 @@ export async function GET(
   }
 
   try {
-    // 1단계: 가격·DART 트렌드 병렬 조회
-    const [priceInfo, dartTrend] = await Promise.all([
-      getPriceInfo(code),
-      getDartTrendOnly(code),
-    ]);
+    // 단일 Promise.all: priceInfo·DART·재무비율·재무요약·일봉 모두 동시 조회
+    // ★ 기존 3단계 순차 구조를 완전 병렬화 — 세마포어가 자동으로 동시성 제어
+    const [priceInfo, dartTrend, financialRatio, balanceSheet, incomeStatement, dailyPrice] =
+      await Promise.all([
+        getPriceInfo(code),
+        getDartTrendOnly(code),
+        getKisFinancialRatio(code),
+        getKisBalanceSheet(code),
+        getKisIncomeStatement(code),
+        getKisDailyPrice(code),
+      ]);
 
-    // 재무비율 1회 호출로 per/pbr/eps/bps + financialRatio 채움
-    const financialRatio = await getKisFinancialRatio(code);
+    // financialRatio 로 PER/PBR 확인 후 필요 시 보조 조회 (조건부이므로 순차 유지)
     let fundamentals: Awaited<ReturnType<typeof getKisStockFundamentals>> = null;
     if (!financialRatio || (parseNum(financialRatio.per ?? financialRatio.stck_per) <= 0 && parseNum(financialRatio.pbr ?? financialRatio.stck_pbr) <= 0)) {
       fundamentals = await getKisStockFundamentals(code, priceInfo?.stckPrpr);
     }
 
-    // 2단계: 재무요약 + DART 잠정/공시 + 일봉 — 병렬 조회
-    // ★ 비율(4개)·추정실적·매매동향은 별도 엔드포인트로 분리되어 여기서는 제외합니다.
-    const [
-      dartRest,
-      balanceSheet,
-      incomeStatement,
-      dailyPrice,
-    ] = await Promise.all([
-      dartTrend?.corpCode
-        ? getDartPreliminaryAndDocument(dartTrend.corpCode)
-        : Promise.resolve({ preliminaryLink: null as string | null, document: {} as DartDocumentSections }),
-      getKisBalanceSheet(code),
-      getKisIncomeStatement(code),
-      getKisDailyPrice(code),
-    ]);
+    // DART 잠정실적·공시문서 (corpCode 필요하므로 dartTrend 완료 후)
+    const dartRest = dartTrend?.corpCode
+      ? await getDartPreliminaryAndDocument(dartTrend.corpCode)
+      : { preliminaryLink: null as string | null, document: {} as DartDocumentSections };
+
 
     // 투자의견은 클라이언트에서 /api/kis/opinion 으로 별도 조회
     const fromRatio = financialRatio
