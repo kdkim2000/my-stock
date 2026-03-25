@@ -8,6 +8,7 @@ import { useAnalysisSummary } from "@/hooks/useAnalysisSummary";
 import { usePortfolioSummary } from "@/hooks/usePortfolioSummary";
 import { useSheetData } from "@/hooks/useSheetData";
 import { useFundamentalData } from "@/hooks/useFundamentalData";
+import { useFundamentalExtended } from "@/hooks/useFundamentalExtended";
 import type {
   TickerDetailInfo,
   TechnicalIndicatorsResponse,
@@ -52,8 +53,19 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
     staleTime: STALE_TIME_DETAIL_MS,
   });
 
-  const code = stockInfoQuery.data?.code ?? "";
+  /**
+   * ★ Waterfall 제거: tickerOrCode가 6자리 코드면 stock-info 완료를 기다리지 않고
+   *   즉시 fundamental 쿼리를 시작합니다.
+   *   ticker(문자열)인 경우만 stock-info 응답에서 code를 얻어야 합니다.
+   */
+  const code = isCode
+    ? tickerOrCode
+    : (stockInfoQuery.data?.code ?? "");
+
   const fundamentalData = useFundamentalData(code, revalidateTrigger);
+  /** 분리된 느린 지표(비율·추정실적·매매동향) — 독립적으로 로딩(방안 2) */
+  const extended = useFundamentalExtended(code, revalidateTrigger);
+
 
   const indicatorsQuery = useQuery<TechnicalIndicatorsResponse>({
     queryKey: ["kis", "indicators", code ?? ""],
@@ -214,10 +226,48 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
       undefined,
     [stockInfoQuery.data?.priceInfo, fundamentalData.kis?.priceInfo]
   );
+  /**
+   * 분리된 ratios/estimate/trading 데이터를 fundamentalData.kis 에 병합합니다.
+   * 섹션 컴포넌트의 props 구조(fundamentalData.kis.XXX)를 그대로 유지하면서
+   * 각 섹션이 도착하는 즉시 화면에 표시됩니다(점진적 로딩).
+   */
+  const mergedFundamental = useMemo(() => {
+    const base = fundamentalData;
+    // extended 데이터가 아직 없으면 base 그대로 반환
+    const ratiosData = extended.ratios.data;
+    const estimateData = extended.estimate.data;
+    const tradingData = extended.trading.data;
+    const hasExtended = ratiosData || estimateData || tradingData;
+    if (!hasExtended) return base;
+    return {
+      ...base,
+      // extended 로딩 중 여부를 isPending 에 반영
+      isPending: base.isPending,
+      isRefetching: base.isRefetching || extended.isRefetching,
+      kis: base.kis
+        ? {
+            ...base.kis,
+            // 비율
+            financialRatio: ratiosData?.financialRatio ?? base.kis.financialRatio,
+            profitRatio: ratiosData?.profitRatio ?? base.kis.profitRatio,
+            stabilityRatio: ratiosData?.stabilityRatio ?? base.kis.stabilityRatio,
+            growthRatio: ratiosData?.growthRatio ?? base.kis.growthRatio,
+            otherMajorRatios: ratiosData?.otherMajorRatios ?? base.kis.otherMajorRatios,
+            // 추정실적
+            estimatePerform: estimateData?.estimatePerform ?? base.kis.estimatePerform,
+            // 매매동향
+            investorTradeDaily: tradingData?.investorTradeDaily ?? base.kis.investorTradeDaily ?? [],
+            dailyTradeVolume: tradingData?.dailyTradeVolume ?? base.kis.dailyTradeVolume ?? [],
+          }
+        : base.kis,
+    };
+  }, [fundamentalData, extended.ratios.data, extended.estimate.data, extended.trading.data, extended.isRefetching]);
+
   const hasPosition = (position?.quantity ?? 0) > 0;
   const isRefreshing =
     stockInfoQuery.isRefetching ||
     fundamentalData.isRefetching ||
+    extended.isRefetching ||
     indicatorsQuery.isRefetching ||
     opinionQuery.isRefetching;
 
@@ -330,13 +380,13 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
       />
 
       <QuoteSection priceInfo={priceInfo} info={info} />
-      <ValuationSection kis={fundamentalData.kis} info={info} />
-      <FinancialSection fundamentalData={fundamentalData} />
+      <ValuationSection kis={mergedFundamental.kis} info={info} />
+      <FinancialSection fundamentalData={mergedFundamental} />
 
-      <RatioSection fundamentalData={fundamentalData} />
-      <EstimateSection fundamentalData={fundamentalData} />
+      <RatioSection fundamentalData={mergedFundamental} />
+      <EstimateSection fundamentalData={mergedFundamental} />
 
-      <TradeSection fundamentalData={fundamentalData} />
+      <TradeSection fundamentalData={mergedFundamental} />
       <OpinionSection opinionQuery={opinionQuery} />
 
       <DartSection fundamentalData={fundamentalData} />

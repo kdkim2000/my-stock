@@ -119,8 +119,7 @@ export async function getKisBalanceSheet(code: string): Promise<Record<string, n
   if (!path) return null;
   const codeStr = String(code).trim();
   const quarterEnd = getLatestQuarterEnd();
-  let body = await kisGet(path, "FHKST66430100", codeStr, { FID_INPUT_DATE_1: quarterEnd, FID_DIV_CLS_CODE: process.env.KIS_FID_DIV_CLS_CODE ?? "0" });
-  if (!body) body = await kisGet(path, "FHKST66430100", codeStr, { FID_DIV_CLS_CODE: process.env.KIS_FID_DIV_CLS_CODE ?? "0" });
+  let body = await kisGetWithRetry("FHKST66430100", codeStr, path);
   if (!body) return null;
   const out = pickFirstOutput(body);
   if (!out) return null;
@@ -152,8 +151,7 @@ export async function getKisIncomeStatement(code: string): Promise<Record<string
   if (!path) return null;
   const codeStr = String(code).trim();
   const quarterEnd = getLatestQuarterEnd();
-  let body = await kisGet(path, "FHKST66430200", codeStr, { FID_INPUT_DATE_1: quarterEnd, FID_DIV_CLS_CODE: process.env.KIS_FID_DIV_CLS_CODE ?? "0" });
-  if (!body) body = await kisGet(path, "FHKST66430200", codeStr, { FID_DIV_CLS_CODE: process.env.KIS_FID_DIV_CLS_CODE ?? "0" });
+  let body = await kisGetWithRetry("FHKST66430200", codeStr, path);
   if (!body) return null;
   const out = pickFirstOutput(body);
   if (!out) return null;
@@ -167,6 +165,54 @@ const financeExtraParams = () => ({
   FID_INPUT_DATE_1: getLatestQuarterEnd(),
   FID_DIV_CLS_CODE: process.env.KIS_FID_DIV_CLS_CODE ?? "0",
 });
+
+/**
+ * 방안 4: Retry 최적화 — 성공한 파라미터 캐시
+ * trId별로 마지막에 성공한 파라미터 조합을 기억합니다.
+ * "withDate" = financeExtraParams() 사용, "noDate" = FID_DIV_CLS_CODE만 사용
+ */
+const PARAM_CACHE_KEY = "__KIS_FINANCE_PARAM_CACHE__" as const;
+type ParamStrategy = "withDate" | "noDate";
+function getParamCache(): Map<string, ParamStrategy> {
+  const g = globalThis as unknown as Record<string, Map<string, ParamStrategy>>;
+  if (!g[PARAM_CACHE_KEY]) g[PARAM_CACHE_KEY] = new Map();
+  return g[PARAM_CACHE_KEY];
+}
+
+async function kisGetWithRetry(
+  trId: string,
+  code: string,
+  path: string
+): Promise<Record<string, unknown> | null> {
+  const divCls = process.env.KIS_FID_DIV_CLS_CODE ?? "0";
+  const cache = getParamCache();
+  const cacheKey = `${trId}:${code}`;
+  const known = cache.get(cacheKey);
+
+  // 성공 이력이 있으면 해당 파라미터를 먼저 시도
+  if (known === "noDate") {
+    const body = await kisGet(path, trId, code, { FID_DIV_CLS_CODE: divCls });
+    if (body) return body;
+    // noDate로 실패하면 withDate도 시도
+    const body2 = await kisGet(path, trId, code, financeExtraParams());
+    if (body2) { cache.set(cacheKey, "withDate"); return body2; }
+    return null;
+  }
+
+  // 기본: withDate 먼저 (분기 기준 파라미터)
+  const body = await kisGet(path, trId, code, financeExtraParams());
+  if (body) {
+    cache.set(cacheKey, "withDate");
+    return body;
+  }
+  // fallback: 날짜 없이 재시도
+  const body2 = await kisGet(path, trId, code, { FID_DIV_CLS_CODE: divCls });
+  if (body2) {
+    cache.set(cacheKey, "noDate");
+    return body2;
+  }
+  return null;
+}
 
 const FINANCIAL_RATIO_NUM_KEYS = [
   "grs", "bsop_prfi_inrt", "ntin_inrt", "roe_val", "eps", "sps", "bps", "rsrv_rate", "lblt_rate",
@@ -210,10 +256,7 @@ export async function getKisProfitRatio(code: string): Promise<Record<string, un
   if (!/^\d{6}$/.test(String(code).trim())) return null;
   const path = KIS_TR_PATH.FHKST66430400;
   if (!path) return null;
-  const codeStr = String(code).trim();
-  const divCls = process.env.KIS_FID_DIV_CLS_CODE ?? "0";
-  let body = await kisGet(path, "FHKST66430400", codeStr, financeExtraParams());
-  if (!body) body = await kisGet(path, "FHKST66430400", codeStr, { FID_DIV_CLS_CODE: divCls });
+  const body = await kisGetWithRetry("FHKST66430400", String(code).trim(), path);
   if (!body) return null;
   return pickFirstOutput(body);
 }
@@ -222,10 +265,7 @@ export async function getKisStabilityRatio(code: string): Promise<Record<string,
   if (!/^\d{6}$/.test(String(code).trim())) return null;
   const path = KIS_TR_PATH.FHKST66430600;
   if (!path) return null;
-  const codeStr = String(code).trim();
-  const divCls = process.env.KIS_FID_DIV_CLS_CODE ?? "0";
-  let body = await kisGet(path, "FHKST66430600", codeStr, financeExtraParams());
-  if (!body) body = await kisGet(path, "FHKST66430600", codeStr, { FID_DIV_CLS_CODE: divCls });
+  const body = await kisGetWithRetry("FHKST66430600", String(code).trim(), path);
   if (!body) return null;
   return pickFirstOutput(body);
 }
@@ -234,10 +274,7 @@ export async function getKisGrowthRatio(code: string): Promise<Record<string, un
   if (!/^\d{6}$/.test(String(code).trim())) return null;
   const path = KIS_TR_PATH.FHKST66430800;
   if (!path) return null;
-  const codeStr = String(code).trim();
-  const divCls = process.env.KIS_FID_DIV_CLS_CODE ?? "0";
-  let body = await kisGet(path, "FHKST66430800", codeStr, financeExtraParams());
-  if (!body) body = await kisGet(path, "FHKST66430800", codeStr, { FID_DIV_CLS_CODE: divCls });
+  const body = await kisGetWithRetry("FHKST66430800", String(code).trim(), path);
   if (!body) return null;
   return pickFirstOutput(body);
 }
@@ -246,10 +283,7 @@ export async function getKisOtherMajorRatios(code: string): Promise<Record<strin
   if (!/^\d{6}$/.test(String(code).trim())) return null;
   const path = KIS_TR_PATH.FHKST66430500;
   if (!path) return null;
-  const codeStr = String(code).trim();
-  const divCls = process.env.KIS_FID_DIV_CLS_CODE ?? "0";
-  let body = await kisGet(path, "FHKST66430500", codeStr, financeExtraParams());
-  if (!body) body = await kisGet(path, "FHKST66430500", codeStr, { FID_DIV_CLS_CODE: divCls });
+  const body = await kisGetWithRetry("FHKST66430500", String(code).trim(), path);
   if (!body) return null;
   return pickFirstOutput(body);
 }

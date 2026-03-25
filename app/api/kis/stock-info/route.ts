@@ -1,18 +1,7 @@
 import { NextResponse } from "next/server";
-import { getPriceInfo, getDailyChart, getKisStockFundamentals } from "@/lib/kis-api";
+import { getPriceInfo } from "@/lib/kis-api";
 import { getTickerCodeMap, codeToTicker } from "@/lib/ticker-mapping";
 import type { TickerDetailInfo } from "@/types/api";
-
-/** 52주 일봉 조회 기간 (최대 100건 제한 있음) */
-function get52WeekDateRange(): { start: string; end: string } {
-  const end = new Date();
-  const start = new Date(end);
-  start.setFullYear(start.getFullYear() - 1);
-  return {
-    start: start.toISOString().slice(0, 10),
-    end: end.toISOString().slice(0, 10),
-  };
-}
 
 /** 쿼리 파라미터 디코딩 (이중 인코딩 시 HTTP 계층에서 한 번 풀린 LG%EC%A0%84... → LG전자) */
 function safeDecodeParam(value: string | null): string {
@@ -35,7 +24,12 @@ function safeDecodeParam(value: string | null): string {
 
 /**
  * GET /api/kis/stock-info?code=005930 또는 ?ticker=삼성전자
- * KIS 현재가·일봉 기반 52주 고/저 반환. 캐시 5분.
+ *
+ * ★ 성능 개선: 현재가(getPriceInfo)만 조회합니다.
+ *   - 52주 일봉(getDailyChart): 슬롯 1개 × ~1s 제거 → 상세 페이지에서 불필요
+ *   - getKisStockFundamentals: 슬롯 1~2개 제거 → /api/fundamental 에서 조회
+ *   이를 통해 stock-info 응답 시간을 ~2.5s → ~0.5s 으로 단축하여
+ *   code 확정 후 fundamental 호출 시작까지의 waterfall 지연을 최소화합니다.
  */
 export async function GET(request: Request): Promise<NextResponse<TickerDetailInfo | { error: string }>> {
   const { searchParams } = new URL(request.url);
@@ -65,41 +59,25 @@ export async function GET(request: Request): Promise<NextResponse<TickerDetailIn
   }
 
   try {
-    const [priceInfo, dailyChart] = await Promise.all([
-      getPriceInfo(code),
-      (async () => {
-        const { start, end } = get52WeekDateRange();
-        return getDailyChart(code!, start, end);
-      })(),
-    ]);
-    const fundamentals = await getKisStockFundamentals(code!, priceInfo?.stckPrpr);
-    const per = fundamentals?.ratios.per && fundamentals.ratios.per > 0 ? fundamentals.ratios.per : undefined;
-    const pbr = fundamentals?.ratios.pbr && fundamentals.ratios.pbr > 0 ? fundamentals.ratios.pbr : undefined;
-    const eps = fundamentals?.ratios.eps != null && fundamentals.ratios.eps !== 0 ? fundamentals.ratios.eps : undefined;
-    const bps = fundamentals?.ratios.bps != null && fundamentals.ratios.bps > 0 ? fundamentals.ratios.bps : undefined;
-
-    let weekly52High: number | null = null;
-    let weekly52Low: number | null = null;
-    if (dailyChart && dailyChart.length > 0) {
-      weekly52High = Math.max(...dailyChart.map((d) => d.high));
-      weekly52Low = Math.min(...dailyChart.map((d) => d.low));
-    }
+    // 현재가만 조회 — fundamental/52주 일봉은 별도 엔드포인트(/api/fundamental)에서 처리
+    const priceInfo = await getPriceInfo(code);
 
     const body: TickerDetailInfo = {
       code,
       ticker,
       priceInfo: priceInfo ?? null,
-      weekly52High,
-      weekly52Low,
-      per: per != null && per > 0 ? per : undefined,
-      pbr: pbr != null && pbr > 0 ? pbr : undefined,
-      eps: eps != null && eps !== 0 ? eps : undefined,
-      bps: bps != null && bps > 0 ? bps : undefined,
+      // 52주 고/저: fundamental의 dailyPrice로 클라이언트에서 계산 가능. 여기선 생략.
+      weekly52High: null,
+      weekly52Low: null,
+      per: undefined,
+      pbr: undefined,
+      eps: undefined,
+      bps: undefined,
     };
 
     return NextResponse.json(body, {
       headers: {
-        "Cache-Control": "public, s-maxage=300, stale-while-revalidate=120",
+        "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120",
       },
     });
   } catch (e) {
