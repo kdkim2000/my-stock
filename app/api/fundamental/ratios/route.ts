@@ -6,6 +6,7 @@ import {
   getKisGrowthRatio,
   getKisOtherMajorRatios,
 } from "@/lib/kis-api";
+import { readTickerCache, writeTickerCache } from "@/lib/ticker-cache";
 
 export interface RatiosApiResponse {
   code: string;
@@ -29,11 +30,25 @@ export async function GET(
 ): Promise<NextResponse<RatiosApiResponse | { error: string }>> {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code")?.trim();
+  const revalidate = searchParams.get("revalidate") === "1";
   if (!code || !/^\d{6}$/.test(code) || code === "000000") {
     return NextResponse.json(
       { error: "code required (6-digit stock code, 000000 invalid)" },
       { status: 400 }
     );
+  }
+
+  // ★ Google Sheets 캐시 확인
+  if (!revalidate) {
+    const cached = await readTickerCache<RatiosApiResponse>(code, "ratios");
+    if (cached) {
+      return NextResponse.json(cached.data, {
+        headers: {
+          "Cache-Control": `public, s-maxage=${CACHE_SEC}, stale-while-revalidate=${SWR_SEC}`,
+          "X-Ticker-Cache": "HIT",
+        },
+      });
+    }
   }
 
   try {
@@ -46,14 +61,17 @@ export async function GET(
         getKisOtherMajorRatios(code),
       ]);
 
-    return NextResponse.json(
-      { code, financialRatio, profitRatio, stabilityRatio, growthRatio, otherMajorRatios },
-      {
-        headers: {
-          "Cache-Control": `public, s-maxage=${CACHE_SEC}, stale-while-revalidate=${SWR_SEC}`,
-        },
-      }
-    );
+    const body: RatiosApiResponse = { code, financialRatio, profitRatio, stabilityRatio, growthRatio, otherMajorRatios };
+
+    // ★ 비동기로 캐시 저장
+    writeTickerCache(code, "ratios", body).catch(() => {});
+
+    return NextResponse.json(body, {
+      headers: {
+        "Cache-Control": `public, s-maxage=${CACHE_SEC}, stale-while-revalidate=${SWR_SEC}`,
+        "X-Ticker-Cache": "MISS",
+      },
+    });
   } catch (e) {
     console.error("[fundamental/ratios] error:", e);
     return NextResponse.json({ error: "Failed to fetch ratios" }, { status: 503 });

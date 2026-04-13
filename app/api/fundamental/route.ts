@@ -24,6 +24,7 @@ import type {
 } from "@/types/api";
 
 import { parseNum } from "@/lib/utils";
+import { readTickerCache, writeTickerCache } from "@/lib/ticker-cache";
 
 export interface FundamentalApiKis {
   priceInfo: KisPriceInfo | null;
@@ -87,11 +88,26 @@ export async function GET(
 ): Promise<NextResponse<FundamentalApiResponse | { error: string }>> {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code")?.trim();
+  const revalidate = searchParams.get("revalidate") === "1";
   if (!code || !/^\d{6}$/.test(code) || code === "000000") {
     return NextResponse.json(
       { error: "code required (6-digit stock code, 000000 invalid)" },
       { status: 400 }
     );
+  }
+
+  // ★ Google Sheets 캐시 확인 (revalidate가 아닌 경우)
+  if (!revalidate) {
+    const cached = await readTickerCache<FundamentalApiResponse>(code, "fundamental");
+    if (cached) {
+      return NextResponse.json(cached.data, {
+        headers: {
+          "Cache-Control": `public, s-maxage=${CACHE_SEC}, stale-while-revalidate=${SWR_SEC}`,
+          "X-Ticker-Cache": "HIT",
+          "X-Ticker-Cache-At": cached.updatedAt,
+        },
+      });
+    }
   }
 
   try {
@@ -168,9 +184,13 @@ export async function GET(
       },
     };
 
+    // ★ 비동기로 캐시 저장 (응답 지연 방지)
+    writeTickerCache(code, "fundamental", body).catch(() => {});
+
     return NextResponse.json(body, {
       headers: {
         "Cache-Control": `public, s-maxage=${CACHE_SEC}, stale-while-revalidate=${SWR_SEC}`,
+        "X-Ticker-Cache": "MISS",
       },
     });
   } catch (e) {

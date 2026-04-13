@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDailyChart } from "@/lib/kis-api";
 import { getTechnicalIndicators } from "@/lib/indicators";
 import type { TechnicalIndicatorsResponse } from "@/types/api";
+import { readTickerCache, writeTickerCache } from "@/lib/ticker-cache";
 
 /** 일봉 조회 기간 (MACD 26+9 등 고려, 최대 100건) */
 function getIndicatorDateRange(): { start: string; end: string } {
@@ -21,11 +22,25 @@ function getIndicatorDateRange(): { start: string; end: string } {
 export async function GET(request: Request): Promise<NextResponse<TechnicalIndicatorsResponse | { error: string }>> {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code")?.trim();
+  const revalidate = searchParams.get("revalidate") === "1";
   if (!code || !/^\d{6}$/.test(code)) {
     return NextResponse.json(
       { error: "code required (6-digit stock code)" },
       { status: 400 }
     );
+  }
+
+  // ★ Google Sheets 캐시 확인
+  if (!revalidate) {
+    const cached = await readTickerCache<TechnicalIndicatorsResponse>(code, "indicators");
+    if (cached) {
+      return NextResponse.json(cached.data, {
+        headers: {
+          "Cache-Control": "public, s-maxage=300, stale-while-revalidate=120",
+          "X-Ticker-Cache": "HIT",
+        },
+      });
+    }
   }
 
   try {
@@ -42,9 +57,13 @@ export async function GET(request: Request): Promise<NextResponse<TechnicalIndic
     const lastDate = chart[chart.length - 1]?.date ?? "";
     const result = getTechnicalIndicators(closes, lastDate);
 
+    // ★ 비동기로 캐시 저장
+    writeTickerCache(code, "indicators", result).catch(() => {});
+
     return NextResponse.json(result, {
       headers: {
         "Cache-Control": "public, s-maxage=300, stale-while-revalidate=120",
+        "X-Ticker-Cache": "MISS",
       },
     });
   } catch (e) {

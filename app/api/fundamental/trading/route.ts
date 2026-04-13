@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getKisInvestorTradeDaily, getKisDailyTradeVolume } from "@/lib/kis-api";
 import type { KisTradingTrendRow } from "@/types/api";
+import { readTickerCache, writeTickerCache } from "@/lib/ticker-cache";
 
 export interface TradingApiResponse {
   code: string;
@@ -21,11 +22,25 @@ export async function GET(
 ): Promise<NextResponse<TradingApiResponse | { error: string }>> {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code")?.trim();
+  const revalidate = searchParams.get("revalidate") === "1";
   if (!code || !/^\d{6}$/.test(code) || code === "000000") {
     return NextResponse.json(
       { error: "code required (6-digit stock code, 000000 invalid)" },
       { status: 400 }
     );
+  }
+
+  // ★ Google Sheets 캐시 확인
+  if (!revalidate) {
+    const cached = await readTickerCache<TradingApiResponse>(code, "trading");
+    if (cached) {
+      return NextResponse.json(cached.data, {
+        headers: {
+          "Cache-Control": `public, s-maxage=${CACHE_SEC}, stale-while-revalidate=${SWR_SEC}`,
+          "X-Ticker-Cache": "HIT",
+        },
+      });
+    }
   }
 
   try {
@@ -34,22 +49,25 @@ export async function GET(
       getKisDailyTradeVolume(code),
     ]);
 
-    return NextResponse.json(
-      {
-        code,
-        investorTradeDaily: Array.isArray(investorTradeDaily)
-          ? (investorTradeDaily as KisTradingTrendRow[])
-          : [],
-        dailyTradeVolume: Array.isArray(dailyTradeVolume)
-          ? (dailyTradeVolume as KisTradingTrendRow[])
-          : [],
+    const body: TradingApiResponse = {
+      code,
+      investorTradeDaily: Array.isArray(investorTradeDaily)
+        ? (investorTradeDaily as KisTradingTrendRow[])
+        : [],
+      dailyTradeVolume: Array.isArray(dailyTradeVolume)
+        ? (dailyTradeVolume as KisTradingTrendRow[])
+        : [],
+    };
+
+    // ★ 비동기로 캐시 저장
+    writeTickerCache(code, "trading", body).catch(() => {});
+
+    return NextResponse.json(body, {
+      headers: {
+        "Cache-Control": `public, s-maxage=${CACHE_SEC}, stale-while-revalidate=${SWR_SEC}`,
+        "X-Ticker-Cache": "MISS",
       },
-      {
-        headers: {
-          "Cache-Control": `public, s-maxage=${CACHE_SEC}, stale-while-revalidate=${SWR_SEC}`,
-        },
-      }
-    );
+    });
   } catch (e) {
     console.error("[fundamental/trading] error:", e);
     return NextResponse.json({ error: "Failed to fetch trading data" }, { status: 503 });
