@@ -68,9 +68,10 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
 
 
   const indicatorsQuery = useQuery<TechnicalIndicatorsResponse>({
-    queryKey: ["kis", "indicators", code ?? ""],
+    queryKey: ["kis", "indicators", code ?? "", revalidateTrigger],
     queryFn: async () => {
-      const res = await apiFetch(`/api/kis/indicators?code=${encodeURIComponent(code!)}`);
+      const revalidate = revalidateTrigger > 0 ? "&revalidate=1" : "";
+      const res = await apiFetch(`/api/kis/indicators?code=${encodeURIComponent(code!)}${revalidate}`);
       if (!res.ok) throw new Error("Failed to fetch indicators");
       return res.json();
     },

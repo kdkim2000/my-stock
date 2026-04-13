@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { unstable_cache } from "next/cache";
 import { getInvestmentOpinion } from "@/lib/kis-api";
 import type { KisInvestmentOpinion } from "@/types/api";
+import { readTickerCache, writeTickerCache } from "@/lib/ticker-cache";
 
 const OPINION_CACHE_SEC = 600; // 10분 — 실시간이 아니므로 메모이제이션
 
@@ -17,6 +18,19 @@ export async function GET(request: Request): Promise<NextResponse<KisInvestmentO
     return NextResponse.json({ error: "code required (6-digit stock code)" }, { status: 400 });
   }
 
+  // ★ Google Sheets 캐시 확인
+  if (!revalidate) {
+    const cached = await readTickerCache<KisInvestmentOpinion>(code, "opinion");
+    if (cached) {
+      return NextResponse.json(cached.data, {
+        headers: {
+          "Cache-Control": `public, s-maxage=${OPINION_CACHE_SEC}, stale-while-revalidate=300`,
+          "X-Ticker-Cache": "HIT",
+        },
+      });
+    }
+  }
+
   try {
     const fetcher = revalidate
       ? () => getInvestmentOpinion(code)
@@ -26,9 +40,14 @@ export async function GET(request: Request): Promise<NextResponse<KisInvestmentO
           { revalidate: OPINION_CACHE_SEC }
         );
     const body = await fetcher();
+
+    // ★ 비동기로 캐시 저장
+    writeTickerCache(code, "opinion", body).catch(() => {});
+
     return NextResponse.json(body, {
       headers: {
         "Cache-Control": `public, s-maxage=${OPINION_CACHE_SEC}, stale-while-revalidate=300`,
+        "X-Ticker-Cache": "MISS",
       },
     });
   } catch (e) {

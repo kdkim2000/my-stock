@@ -75,10 +75,10 @@ function getSpreadsheetId(): string | undefined {
   return process.env.GOOGLE_SPREADSHEET_ID;
 }
 
-type Auth = { token: string; projectId: string };
+export type Auth = { token: string; projectId: string };
 
 /** 서비스 계정으로 액세스 토큰 + project_id 획득 */
-async function getSheetsAuth(): Promise<Auth> {
+export async function getSheetsAuth(): Promise<Auth> {
   const jsonStr = process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim();
   if (jsonStr) {
     try {

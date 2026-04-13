@@ -22,6 +22,9 @@ yarn-debug.log*
 yarn-error.log*
 .turbo
 .vercel
+.cursor
+.claude
+
 
 # IDE / editor
 .idea/
