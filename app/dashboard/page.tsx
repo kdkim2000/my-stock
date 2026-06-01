@@ -28,26 +28,7 @@ export default function DashboardPage() {
 
         <SummaryCards />
 
-        <section id="ticker-analysis" className={SECTION_CLASS}>
-          <h2 className={SECTION_TITLE_CLASS}>
-            <LayoutList className="w-5 h-5 shrink-0 text-muted-foreground" />
-            종목별 분석
-          </h2>
-          <div className="rounded-lg border border-border/50 bg-muted/5 overflow-hidden">
-            <TickerAnalysisTable />
-          </div>
-        </section>
-
-        <section className={SECTION_CLASS}>
-          <h2 className={SECTION_TITLE_CLASS}>
-            <TrendingUp className="w-5 h-5 shrink-0 text-muted-foreground" />
-            누적 수익금 추이
-          </h2>
-          <div className="rounded-lg border border-border/50 bg-muted/5 p-4">
-            <CumulativePnlChart />
-          </div>
-        </section>
-
+        {/* 포트폴리오 현황: 포지션 집중도 + 손익 기여도 */}
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className={SECTION_CLASS}>
             <h2 className={SECTION_TITLE_CLASS}>
@@ -66,6 +47,26 @@ export default function DashboardPage() {
             <div className="rounded-lg border border-border/50 bg-muted/5 p-4">
               <PnLContributionChart />
             </div>
+          </div>
+        </section>
+
+        <section className={SECTION_CLASS}>
+          <h2 className={SECTION_TITLE_CLASS}>
+            <TrendingUp className="w-5 h-5 shrink-0 text-muted-foreground" />
+            누적 수익금 추이
+          </h2>
+          <div className="rounded-lg border border-border/50 bg-muted/5 p-4">
+            <CumulativePnlChart />
+          </div>
+        </section>
+
+        <section id="ticker-analysis" className={SECTION_CLASS}>
+          <h2 className={SECTION_TITLE_CLASS}>
+            <LayoutList className="w-5 h-5 shrink-0 text-muted-foreground" />
+            종목별 분석
+          </h2>
+          <div className="rounded-lg border border-border/50 bg-muted/5 overflow-hidden">
+            <TickerAnalysisTable />
           </div>
         </section>
 

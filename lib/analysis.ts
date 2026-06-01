@@ -13,7 +13,8 @@ import { PositionTracker } from "./position-tracker";
  */
 function parseTags(text: string): string[] {
   if (!text?.trim()) return [];
-  const tokens = (text + "").split(/[\s,#]+/).filter(Boolean);
+  // 공백/쉼표로 분리 후 #으로 시작하는 토큰만 추출 (예: "#전략A" → "전략A")
+  const tokens = (text + "").split(/[\s,]+/).filter(Boolean);
   const tags = tokens
     .filter((t) => t.startsWith("#"))
     .map((t) => t.replace(/^#+/, "").trim())

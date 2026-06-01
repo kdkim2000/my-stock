@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { badRequest, serverError } from "@/lib/api-response";
 import {
   getPriceInfo,
   getKisStockFundamentals,
@@ -90,10 +91,7 @@ export async function GET(
   const code = searchParams.get("code")?.trim();
   const revalidate = searchParams.get("revalidate") === "1";
   if (!code || !/^\d{6}$/.test(code) || code === "000000") {
-    return NextResponse.json(
-      { error: "code required (6-digit stock code, 000000 invalid)" },
-      { status: 400 }
-    );
+    return badRequest("code required (6-digit stock code, 000000 invalid)");
   }
 
   // ★ Google Sheets 캐시 확인 (revalidate가 아닌 경우)
@@ -111,28 +109,42 @@ export async function GET(
   }
 
   try {
-    // 단일 Promise.all: priceInfo·DART·재무비율·재무요약·일봉 모두 동시 조회
-    // ★ 기존 3단계 순차 구조를 완전 병렬화 — 세마포어가 자동으로 동시성 제어
-    const [priceInfo, dartTrend, financialRatio, balanceSheet, incomeStatement, dailyPrice] =
-      await Promise.all([
+    // dartTrend를 먼저 독립 Promise로 시작해 corpCode 확보 즉시 문서 조회 파이프라인 연결
+    const dartTrendPromise = getDartTrendOnly(code);
+    // dartTrend 완료 즉시 getDartPreliminaryAndDocument 시작 (KIS 호출 대기 중 병렬 진행)
+    const dartRestPromise = dartTrendPromise.then((trend) =>
+      trend?.corpCode
+        ? getDartPreliminaryAndDocument(trend.corpCode)
+        : Promise.resolve({ preliminaryLink: null as string | null, document: {} as DartDocumentSections })
+    );
+
+    // Promise.allSettled: 하나 실패해도 나머지 결과 활용 (가용성 향상)
+    const [priceRes, dartTrendRes, ratioRes, bsRes, isRes, dpRes, dartRestRes] =
+      await Promise.allSettled([
         getPriceInfo(code),
-        getDartTrendOnly(code),
+        dartTrendPromise,
         getKisFinancialRatio(code),
         getKisBalanceSheet(code),
         getKisIncomeStatement(code),
         getKisDailyPrice(code),
+        dartRestPromise,
       ]);
 
-    // financialRatio 로 PER/PBR 확인 후 필요 시 보조 조회 (조건부이므로 순차 유지)
+    const priceInfo   = priceRes.status     === "fulfilled" ? priceRes.value     : null;
+    const dartTrend   = dartTrendRes.status === "fulfilled" ? dartTrendRes.value  : null;
+    const financialRatio = ratioRes.status  === "fulfilled" ? ratioRes.value      : null;
+    const balanceSheet   = bsRes.status     === "fulfilled" ? bsRes.value        : null;
+    const incomeStatement = isRes.status    === "fulfilled" ? isRes.value        : null;
+    const dailyPrice  = dpRes.status        === "fulfilled" ? dpRes.value        : null;
+    const dartRest    = dartRestRes.status  === "fulfilled"
+      ? dartRestRes.value
+      : { preliminaryLink: null as string | null, document: {} as DartDocumentSections };
+
+    // financialRatio로 PER/PBR 확인 후 필요 시 보조 조회 (조건부이므로 순차 유지)
     let fundamentals: Awaited<ReturnType<typeof getKisStockFundamentals>> = null;
     if (!financialRatio || (parseNum(financialRatio.per ?? financialRatio.stck_per) <= 0 && parseNum(financialRatio.pbr ?? financialRatio.stck_pbr) <= 0)) {
       fundamentals = await getKisStockFundamentals(code, priceInfo?.stckPrpr);
     }
-
-    // DART 잠정실적·공시문서 (corpCode 필요하므로 dartTrend 완료 후)
-    const dartRest = dartTrend?.corpCode
-      ? await getDartPreliminaryAndDocument(dartTrend.corpCode)
-      : { preliminaryLink: null as string | null, document: {} as DartDocumentSections };
 
 
     // 투자의견은 클라이언트에서 /api/kis/opinion 으로 별도 조회
@@ -194,10 +206,6 @@ export async function GET(
       },
     });
   } catch (e) {
-    console.error("[fundamental] error:", e);
-    return NextResponse.json(
-      { error: "Failed to fetch fundamental data" },
-      { status: 503 }
-    );
+    return serverError("Failed to fetch fundamental data", e);
   }
 }

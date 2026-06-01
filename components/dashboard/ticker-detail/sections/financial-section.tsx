@@ -11,9 +11,18 @@ import {
 } from "recharts";
 import { formatFundamentalNum } from "../utils";
 import { FinancialSectionSkeleton } from "../skeletons";
+import type { KisBalanceSheetData, KisIncomeStatementData } from "@/types/api";
+
+interface FundamentalDataForFinancial {
+  isPending: boolean;
+  kis?: {
+    balanceSheet?: KisBalanceSheetData | null;
+    incomeStatement?: KisIncomeStatementData | null;
+  } | null;
+}
 
 interface FinancialSectionProps {
-  fundamentalData: any;
+  fundamentalData: FundamentalDataForFinancial;
 }
 
 export function FinancialSection({ fundamentalData }: FinancialSectionProps) {

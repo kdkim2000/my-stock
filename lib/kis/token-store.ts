@@ -10,6 +10,8 @@
  * 로컬: 기존 파일 캐시 방식 그대로 유지 (process.env.VERCEL !== '1')
  */
 
+import { getServiceAccountToken } from "../google-oauth";
+
 export interface PersistentTokenEntry {
     token: string;
     expiresAt: number; // ms timestamp
@@ -17,93 +19,6 @@ export interface PersistentTokenEntry {
 
 const SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 const SHEET_TAB = "_KIS_TOKEN_";
-
-/** Google OAuth 토큰 캐시 (globalThis 공유, 1시간 유효 - 5분 버퍼) */
-const GTOKEN_CACHE_KEY = "__GOOGLE_SHEETS_TOKEN_CACHE__" as const;
-const GTOKEN_BUFFER_MS = 5 * 60 * 1000; // 만료 5분 전에 갱신
-
-type GTokenCache = {
-    token: string;
-    expiresAt: number;
-    promise: Promise<string | null> | null;
-};
-
-function getGTokenCache(): GTokenCache {
-    const g = globalThis as unknown as Record<string, GTokenCache>;
-    if (!g[GTOKEN_CACHE_KEY]) {
-        g[GTOKEN_CACHE_KEY] = { token: "", expiresAt: 0, promise: null };
-    }
-    return g[GTOKEN_CACHE_KEY];
-}
-
-/** Google Sheets API 용 서비스 계정 액세스 토큰 (Google OAuth2, 1시간 유효, 캐싱) */
-async function getSheetsAccessToken(): Promise<string | null> {
-    const cache = getGTokenCache();
-
-    // 캐시된 토큰이 유효하면 즉시 반환
-    if (cache.token && cache.expiresAt > Date.now()) {
-        return cache.token;
-    }
-
-    // 이미 갱신 중이면 같은 Promise를 대기
-    if (cache.promise) {
-        return cache.promise;
-    }
-
-    cache.promise = (async (): Promise<string | null> => {
-        const jsonStr = process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim();
-        if (!jsonStr) return null;
-        try {
-            const creds = JSON.parse(jsonStr) as {
-                client_email?: string;
-                private_key?: string;
-            };
-            if (!creds.client_email || !creds.private_key) return null;
-
-            const { createSign } = await import("crypto");
-            const now = Math.floor(Date.now() / 1000);
-            const header = { alg: "RS256", typ: "JWT" };
-            const payload = {
-                iss: creds.client_email,
-                scope: "https://www.googleapis.com/auth/spreadsheets",
-                aud: "https://oauth2.googleapis.com/token",
-                iat: now,
-                exp: now + 3600,
-            };
-            function b64url(s: string) {
-                return Buffer.from(s).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-            }
-            const sigInput = `${b64url(JSON.stringify(header))}.${b64url(JSON.stringify(payload))}`;
-            const sign = createSign("RSA-SHA256");
-            sign.update(sigInput);
-            const jwt = `${sigInput}.${sign.sign(creds.private_key).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`;
-
-            const res = await fetch("https://oauth2.googleapis.com/token", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({
-                    grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-                    assertion: jwt,
-                }).toString(),
-            });
-            if (!res.ok) return null;
-            const data = (await res.json()) as { access_token?: string };
-            const token = data.access_token ?? null;
-            if (token) {
-                cache.token = token;
-                // JWT exp는 now + 3600이므로 발급 시점에서 55분 후 갱신
-                cache.expiresAt = Date.now() + 3600 * 1000 - GTOKEN_BUFFER_MS;
-            }
-            return token;
-        } catch {
-            return null;
-        } finally {
-            cache.promise = null;
-        }
-    })();
-
-    return cache.promise;
-}
 
 /** Sheets에서 토큰 읽기 */
 export async function readTokenFromSheets(): Promise<PersistentTokenEntry | null> {
@@ -113,7 +28,7 @@ export async function readTokenFromSheets(): Promise<PersistentTokenEntry | null
         return null;
     }
     try {
-        const gToken = await getSheetsAccessToken();
+        const gToken = await getServiceAccountToken();
         if (!gToken) {
             console.warn("[KIS Token] Failed to get Google OAuth token for read.");
             return null;
@@ -154,7 +69,7 @@ export async function writeTokenToSheets(entry: PersistentTokenEntry): Promise<v
         return;
     }
     try {
-        const gToken = await getSheetsAccessToken();
+        const gToken = await getServiceAccountToken();
         if (!gToken) {
             console.warn("[KIS Token] Failed to get Google OAuth token for write.");
             return;

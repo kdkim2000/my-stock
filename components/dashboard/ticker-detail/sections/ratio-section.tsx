@@ -23,9 +23,21 @@ import {
 } from "../ratio-utils";
 import { RATIO_KIS_GROUPS } from "../constants";
 import { RatioSectionSkeleton } from "../skeletons";
+import type { KisRatioData } from "@/types/api";
+
+interface FundamentalDataForRatio {
+  isPending: boolean;
+  kis?: {
+    financialRatio?: KisRatioData | null;
+    profitRatio?: KisRatioData | null;
+    stabilityRatio?: KisRatioData | null;
+    growthRatio?: KisRatioData | null;
+    otherMajorRatios?: KisRatioData | null;
+  } | null;
+}
 
 interface RatioSectionProps {
-  fundamentalData: any;
+  fundamentalData: FundamentalDataForRatio;
 }
 
 export function RatioSection({ fundamentalData }: RatioSectionProps) {
@@ -55,7 +67,7 @@ export function RatioSection({ fundamentalData }: RatioSectionProps) {
   const ratioOnlyBarData = buildRatioOnlyBarData(allRatioRecs);
   const valueOnlyBarData = buildValueOnlyBarData(allRatioRecs);
   const ratioCards = RATIO_KIS_GROUPS.map((group) => {
-    const data = kis?.[group.dataKey] as Record<string, unknown> | null;
+    const data = (kis as Record<string, KisRatioData | null | undefined> | null | undefined)?.[group.dataKey] as Record<string, unknown> | null ?? null;
     const card = renderRatioKisCard(group.title, data, group.items);
     if (!card) return null;
     return <Fragment key={group.title}>{card}</Fragment>;

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { badRequest, serverError } from "@/lib/api-response";
 import { getPriceInfo } from "@/lib/kis-api";
 import { getTickerCodeMap, codeToTicker } from "@/lib/ticker-mapping";
 import type { TickerDetailInfo } from "@/types/api";
@@ -55,7 +56,7 @@ export async function GET(request: Request): Promise<NextResponse<TickerDetailIn
   }
 
   if (!code) {
-    return NextResponse.json({ error: "code or ticker required (6-digit code or ticker name)" }, { status: 400 });
+    return badRequest("code or ticker required (6-digit code or ticker name)");
   }
 
   try {
@@ -81,7 +82,6 @@ export async function GET(request: Request): Promise<NextResponse<TickerDetailIn
       },
     });
   } catch (e) {
-    console.error("[KIS] stock-info error:", e);
-    return NextResponse.json({ error: "Failed to fetch stock info" }, { status: 503 });
+    return serverError("Failed to fetch stock info", e);
   }
 }

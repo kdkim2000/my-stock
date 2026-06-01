@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { badRequest, serverError } from "@/lib/api-response";
 import { unstable_cache } from "next/cache";
 import { getFinancialsByStockCode, computeRatios, getCorpCodeByStockCode, getFnlttSinglAcnt } from "@/lib/dart-api";
 import { getKisStockFundamentals } from "@/lib/kis-api";
@@ -89,10 +90,7 @@ export async function GET(request: Request): Promise<NextResponse<unknown>> {
   const pbrFromQuery = queryPbr != null && queryPbr !== "" ? Number(queryPbr) : undefined;
 
   if (!code || !/^\d{6}$/.test(code)) {
-    return NextResponse.json(
-      { error: "code required (6-digit stock code)" },
-      { status: 400 }
-    );
+    return badRequest("code required (6-digit stock code)");
   }
 
   try {
@@ -149,10 +147,6 @@ export async function GET(request: Request): Promise<NextResponse<unknown>> {
       },
     });
   } catch (e) {
-    console.error("[DART] financials error:", e);
-    return NextResponse.json(
-      { error: "Failed to fetch financials" },
-      { status: 503 }
-    );
+    return serverError("Failed to fetch financials", e);
   }
 }

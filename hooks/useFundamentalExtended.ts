@@ -31,6 +31,7 @@ export function useFundamentalExtended(code: string, revalidateTrigger = 0) {
     },
     enabled: hasCode,
     staleTime: STALE_MS,
+    refetchOnWindowFocus: false,
   });
 
   const estimateQuery = useQuery<EstimateApiResponse>({
@@ -43,6 +44,7 @@ export function useFundamentalExtended(code: string, revalidateTrigger = 0) {
     },
     enabled: hasCode,
     staleTime: STALE_MS,
+    refetchOnWindowFocus: false,
   });
 
   const tradingQuery = useQuery<TradingApiResponse>({
@@ -55,6 +57,7 @@ export function useFundamentalExtended(code: string, revalidateTrigger = 0) {
     },
     enabled: hasCode,
     staleTime: STALE_MS,
+    refetchOnWindowFocus: false,
   });
 
   return {

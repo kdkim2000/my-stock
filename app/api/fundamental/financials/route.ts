@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { badRequest, serverError } from "@/lib/api-response";
 import {
   getFundamentalFinancials,
   getDartDocumentSections,
@@ -22,10 +23,7 @@ export async function GET(
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code")?.trim();
   if (!code || !/^\d{6}$/.test(code)) {
-    return NextResponse.json(
-      { error: "code required (6-digit stock code)" },
-      { status: 400 }
-    );
+    return badRequest("code required (6-digit stock code)");
   }
 
   try {
@@ -44,10 +42,6 @@ export async function GET(
       headers: { "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=600" },
     });
   } catch (e) {
-    console.error("[fundamental/financials] error:", e);
-    return NextResponse.json(
-      { error: "Failed to fetch financials" },
-      { status: 503 }
-    );
+    return serverError("Failed to fetch financials", e);
   }
 }

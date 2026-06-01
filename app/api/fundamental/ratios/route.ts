@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { badRequest, serverError } from "@/lib/api-response";
 import {
   getKisFinancialRatio,
   getKisProfitRatio,
@@ -32,10 +33,7 @@ export async function GET(
   const code = searchParams.get("code")?.trim();
   const revalidate = searchParams.get("revalidate") === "1";
   if (!code || !/^\d{6}$/.test(code) || code === "000000") {
-    return NextResponse.json(
-      { error: "code required (6-digit stock code, 000000 invalid)" },
-      { status: 400 }
-    );
+    return badRequest("code required (6-digit stock code, 000000 invalid)");
   }
 
   // ★ Google Sheets 캐시 확인
@@ -52,14 +50,19 @@ export async function GET(
   }
 
   try {
-    const [financialRatio, profitRatio, stabilityRatio, growthRatio, otherMajorRatios] =
-      await Promise.all([
+    const [ratioRes, profitRes, stabilityRes, growthRes, otherRes] =
+      await Promise.allSettled([
         getKisFinancialRatio(code),
         getKisProfitRatio(code),
         getKisStabilityRatio(code),
         getKisGrowthRatio(code),
         getKisOtherMajorRatios(code),
       ]);
+    const financialRatio = ratioRes.status    === "fulfilled" ? ratioRes.value    : null;
+    const profitRatio    = profitRes.status   === "fulfilled" ? profitRes.value   : null;
+    const stabilityRatio = stabilityRes.status === "fulfilled" ? stabilityRes.value : null;
+    const growthRatio    = growthRes.status   === "fulfilled" ? growthRes.value   : null;
+    const otherMajorRatios = otherRes.status  === "fulfilled" ? otherRes.value    : null;
 
     const body: RatiosApiResponse = { code, financialRatio, profitRatio, stabilityRatio, growthRatio, otherMajorRatios };
 
@@ -73,7 +76,6 @@ export async function GET(
       },
     });
   } catch (e) {
-    console.error("[fundamental/ratios] error:", e);
-    return NextResponse.json({ error: "Failed to fetch ratios" }, { status: 503 });
+    return serverError("Failed to fetch ratios", e);
   }
 }

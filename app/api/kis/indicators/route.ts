@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { badRequest, serverError } from "@/lib/api-response";
 import { getDailyChart } from "@/lib/kis-api";
 import { getTechnicalIndicators } from "@/lib/indicators";
 import type { TechnicalIndicatorsResponse } from "@/types/api";
@@ -24,10 +25,7 @@ export async function GET(request: Request): Promise<NextResponse<TechnicalIndic
   const code = searchParams.get("code")?.trim();
   const revalidate = searchParams.get("revalidate") === "1";
   if (!code || !/^\d{6}$/.test(code)) {
-    return NextResponse.json(
-      { error: "code required (6-digit stock code)" },
-      { status: 400 }
-    );
+    return badRequest("code required (6-digit stock code)");
   }
 
   // ★ Google Sheets 캐시 확인
@@ -67,10 +65,6 @@ export async function GET(request: Request): Promise<NextResponse<TechnicalIndic
       },
     });
   } catch (e) {
-    console.error("[KIS] indicators error:", e);
-    return NextResponse.json(
-      { error: "Failed to fetch indicators" },
-      { status: 503 }
-    );
+    return serverError("Failed to fetch indicators", e);
   }
 }

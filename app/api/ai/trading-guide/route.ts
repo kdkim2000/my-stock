@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { badRequest, serverError } from "@/lib/api-response";
 import OpenAI from "openai";
 import { readAiCache, writeAiCache } from "@/lib/ai-cache";
 import { getPriceInfo, getKisFinancialRatio, getInvestmentOpinion, getDailyChart } from "@/lib/kis-api";
@@ -55,14 +56,6 @@ function formatJournalForPrompt(
 }
 
 export async function POST(request: Request) {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "OPENAI_API_KEY is not configured" },
-      { status: 503 }
-    );
-  }
-
   let body: {
     code?: string;
     ticker?: string;
@@ -76,15 +69,12 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return badRequest("Invalid JSON body");
   }
 
   const code = String(body.code ?? "").trim().padStart(6, "0");
   if (!/^\d{6}$/.test(code)) {
-    return NextResponse.json(
-      { error: "code required (6-digit stock code)" },
-      { status: 400 }
-    );
+    return badRequest("code required (6-digit stock code)");
   }
 
   const displayTicker = body.ticker?.trim() || code;
@@ -92,7 +82,8 @@ export async function POST(request: Request) {
   const useClientContext = Boolean(body.context?.detailSummary?.trim());
 
   try {
-    // 캐시 우선: force가 아니면 Google Sheets에서 기존 결과 반환
+    // 캐시 우선: force가 아니면 Google Sheets에서 기존 결과 반환.
+    // cacheOnly: true 는 OpenAI를 호출하지 않으므로 OPENAI_API_KEY 불필요.
     if (!forceRefresh) {
       const cached = await readAiCache(code);
       if (cached && cached.content) {
@@ -101,13 +92,21 @@ export async function POST(request: Request) {
           cachedAt: cached.updatedAt,
         });
       }
-      // 캐시가 없는데 cacheOnly 모드인 경우 OpenAI 호출 없이 즉시 반환
       if (body.cacheOnly === true) {
         return NextResponse.json({
           content: null,
           cachedAt: null,
         });
       }
+    }
+
+    // 실제 OpenAI 호출이 필요한 경우에만 API 키 확인
+    const apiKey = process.env.OPENAI_API_KEY?.trim();
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "OPENAI_API_KEY가 설정되지 않았습니다." },
+        { status: 503 }
+      );
     }
     let userPayload: string;
     let journalText: string;
@@ -273,17 +272,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ content, cachedAt: new Date().toISOString() });
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Unknown error";
-    console.error("[AI trading-guide] error:", e);
     if (e instanceof OpenAI.APIError) {
       return NextResponse.json(
         { error: `OpenAI API: ${e.message}` },
         { status: e.status ?? 502 }
       );
     }
-    return NextResponse.json(
-      { error: `Failed to generate guide: ${message}` },
-      { status: 503 }
-    );
+    return serverError("Failed to generate guide", e);
   }
 }

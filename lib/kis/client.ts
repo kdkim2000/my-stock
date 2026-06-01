@@ -1,5 +1,5 @@
 import { waitKisThrottle, releaseKisThrottle } from "./throttle";
-import { getAccessToken, clearKisTokenCache, isKisTokenExpiredResponse } from "./token";
+import { getAccessToken, softExpireKisToken, isKisTokenExpiredResponse } from "./token";
 import { kisCacheGet, kisCacheSet, KIS_CACHE_TTL_PRICE_MS, KIS_CACHE_TTL_FUND_MS } from "./cache";
 import { getBaseUrl } from "./config";
 
@@ -43,7 +43,7 @@ export async function kisGet(
     let res = await doFetch(token);
     let bodyText = await res.text();
     if (!res.ok && res.status === 500 && isKisTokenExpiredResponse(bodyText)) {
-      clearKisTokenCache();
+      softExpireKisToken();
       const newToken = await getAccessToken();
       if (newToken) {
         res = await doFetch(newToken);

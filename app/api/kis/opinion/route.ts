@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { badRequest, serverError } from "@/lib/api-response";
 import { unstable_cache } from "next/cache";
 import { getInvestmentOpinion } from "@/lib/kis-api";
 import type { KisInvestmentOpinion } from "@/types/api";
@@ -15,7 +16,7 @@ export async function GET(request: Request): Promise<NextResponse<KisInvestmentO
   const code = String(searchParams.get("code") ?? "").trim();
   const revalidate = searchParams.get("revalidate") === "1";
   if (!/^\d{6}$/.test(code)) {
-    return NextResponse.json({ error: "code required (6-digit stock code)" }, { status: 400 });
+    return badRequest("code required (6-digit stock code)");
   }
 
   // ★ Google Sheets 캐시 확인
@@ -51,7 +52,6 @@ export async function GET(request: Request): Promise<NextResponse<KisInvestmentO
       },
     });
   } catch (e) {
-    console.error("[KIS] opinion error:", e);
-    return NextResponse.json({ error: "Failed to fetch investment opinion" }, { status: 503 });
+    return serverError("Failed to fetch investment opinion", e);
   }
 }

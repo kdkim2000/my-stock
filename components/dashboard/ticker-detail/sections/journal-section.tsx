@@ -1,8 +1,9 @@
 import React from "react";
 import { Calendar } from "lucide-react";
+import type { SheetTransactionRow } from "@/types/sheet";
 
 interface JournalSectionProps {
-  transactions: any[];
+  transactions: SheetTransactionRow[];
 }
 
 export function JournalSection({ transactions }: JournalSectionProps) {

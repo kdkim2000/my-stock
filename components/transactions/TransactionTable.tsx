@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useSheetData } from "@/hooks/useSheetData";
 import type { SheetTransactionRow } from "@/types/sheet";
+import { TableSkeleton } from "@/components/ui/table-skeleton";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 30, 50] as const;
 const DEFAULT_PAGE_SIZE = 10;
@@ -51,11 +52,7 @@ export function TransactionTable() {
   }, [totalPages, page]);
 
   if (isPending) {
-    return (
-      <div className="py-8 text-center text-muted-foreground text-sm">
-        로딩 중…
-      </div>
-    );
+    return <TableSkeleton rows={5} cols={6} className="py-2" />;
   }
   if (error) {
     return (

@@ -1,9 +1,12 @@
 import React from "react";
 import { Wallet } from "lucide-react";
+import type { TickerAnalysisRow, PortfolioSummaryResponse } from "@/types/api";
+
+type PortfolioPosition = NonNullable<PortfolioSummaryResponse["positions"]>[number];
 
 interface PortfolioSectionProps {
-  analysisRow: any;
-  position: any;
+  analysisRow: TickerAnalysisRow | null | undefined;
+  position: PortfolioPosition | null | undefined;
 }
 
 export function PortfolioSection({ analysisRow, position }: PortfolioSectionProps) {

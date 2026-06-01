@@ -7,68 +7,17 @@
  * - writeAiCache(code, ticker, content): 분석결과 저장 (기존 행 업데이트 or 신규 추가)
  */
 
+import { getServiceAccountToken } from "./google-oauth";
+
 const SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 const SHEET_TAB = "_AI_CACHE_";
+const AI_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7일
 
 export interface AiCacheEntry {
     code: string;
     ticker: string;
     content: string;
     updatedAt: string; // ISO string
-}
-
-/** Google Sheets 서비스 계정 액세스 토큰 획득 */
-async function getSheetsToken(): Promise<string | null> {
-    const jsonStr = process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim();
-    if (!jsonStr) return null;
-    try {
-        const creds = JSON.parse(jsonStr) as {
-            client_email?: string;
-            private_key?: string;
-        };
-        if (!creds.client_email || !creds.private_key) return null;
-
-        const { createSign } = await import("crypto");
-        const now = Math.floor(Date.now() / 1000);
-        const header = { alg: "RS256", typ: "JWT" };
-        const payload = {
-            iss: creds.client_email,
-            scope: "https://www.googleapis.com/auth/spreadsheets",
-            aud: "https://oauth2.googleapis.com/token",
-            iat: now,
-            exp: now + 3600,
-        };
-        function b64url(s: string) {
-            return Buffer.from(s)
-                .toString("base64")
-                .replace(/\+/g, "-")
-                .replace(/\//g, "_")
-                .replace(/=+$/, "");
-        }
-        const sigInput = `${b64url(JSON.stringify(header))}.${b64url(JSON.stringify(payload))}`;
-        const sign = createSign("RSA-SHA256");
-        sign.update(sigInput);
-        const jwt = `${sigInput}.${sign
-            .sign(creds.private_key)
-            .toString("base64")
-            .replace(/\+/g, "-")
-            .replace(/\//g, "_")
-            .replace(/=+$/, "")}`;
-
-        const res = await fetch("https://oauth2.googleapis.com/token", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({
-                grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-                assertion: jwt,
-            }).toString(),
-        });
-        if (!res.ok) return null;
-        const data = (await res.json()) as { access_token?: string };
-        return data.access_token ?? null;
-    } catch {
-        return null;
-    }
 }
 
 /**
@@ -79,7 +28,7 @@ export async function readAiCache(code: string): Promise<AiCacheEntry | null> {
     const spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID?.trim();
     if (!spreadsheetId) return null;
     try {
-        const gToken = await getSheetsToken();
+        const gToken = await getServiceAccountToken();
         if (!gToken) return null;
 
         const range = encodeURIComponent(`'${SHEET_TAB}'!A:D`);
@@ -91,14 +40,19 @@ export async function readAiCache(code: string): Promise<AiCacheEntry | null> {
         const data = (await res.json()) as { values?: string[][] };
         const rows = data.values ?? [];
 
-        // A열(code)에서 일치하는 행 검색
+        // A열(code)에서 일치하는 행 검색 (TTL 7일 초과 시 만료 처리)
         for (const row of rows) {
             if (row[0] === code) {
+                const updatedAt = row[3] ?? "";
+                if (updatedAt) {
+                    const age = Date.now() - new Date(updatedAt).getTime();
+                    if (age > AI_CACHE_TTL_MS) return null;
+                }
                 return {
                     code: row[0],
                     ticker: row[1] ?? "",
                     content: row[2] ?? "",
-                    updatedAt: row[3] ?? "",
+                    updatedAt,
                 };
             }
         }
@@ -120,7 +74,7 @@ export async function writeAiCache(
     const spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID?.trim();
     if (!spreadsheetId) return;
     try {
-        const gToken = await getSheetsToken();
+        const gToken = await getServiceAccountToken();
         if (!gToken) return;
 
         const headers = {
