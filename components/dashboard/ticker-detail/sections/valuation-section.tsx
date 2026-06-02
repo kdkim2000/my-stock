@@ -1,9 +1,24 @@
 import React from "react";
 import { CircleDollarSign } from "lucide-react";
 
+interface ValuationKis {
+  per?: number | null;
+  pbr?: number | null;
+  eps?: number | null;
+  bps?: number | null;
+  forwardEps?: number | null;
+}
+
+interface ValuationInfo {
+  per?: number | null;
+  pbr?: number | null;
+  eps?: number | null;
+  bps?: number | null;
+}
+
 interface ValuationSectionProps {
-  kis?: any;
-  info?: any;
+  kis?: ValuationKis | null;
+  info?: ValuationInfo | null;
 }
 
 export function ValuationSection({ kis, info }: ValuationSectionProps) {

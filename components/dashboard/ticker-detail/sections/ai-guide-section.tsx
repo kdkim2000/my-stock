@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 interface AiGuideSectionProps {
   aiLoading: boolean;
   aiError: string | null;
+  aiAuthError: boolean;
   aiContent: string | null;
   aiCachedAt: string | null;
   code: string;
@@ -15,6 +16,7 @@ interface AiGuideSectionProps {
 export function AiGuideSection({
   aiLoading,
   aiError,
+  aiAuthError,
   aiContent,
   aiCachedAt,
   code,
@@ -79,6 +81,25 @@ export function AiGuideSection({
           </button>
         )}
       </div>
+
+      {/* 인증 오류: 세션 만료 안내 */}
+      {aiAuthError && (
+        <div
+          className="mb-4 rounded-lg border border-amber-300/50 bg-amber-50/50 dark:bg-amber-950/20 px-4 py-3 text-sm"
+          role="alert"
+        >
+          <p className="font-medium mb-1 text-amber-800 dark:text-amber-300">세션이 만료되었습니다</p>
+          <p className="text-xs text-muted-foreground mb-3">
+            로그인 세션이 만료되어 AI 분석을 실행할 수 없습니다.
+          </p>
+          <a
+            href="/auth/signin"
+            className="inline-flex items-center gap-1.5 rounded-md border border-amber-300/60 bg-background px-3 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+          >
+            다시 로그인
+          </a>
+        </div>
+      )}
 
       {/* 에러: 재시도 가능 */}
       {aiError && (

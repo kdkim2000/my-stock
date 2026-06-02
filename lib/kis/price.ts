@@ -1,5 +1,5 @@
 import { parseNum } from "../utils";
-import { getAccessToken, clearKisTokenCache, isKisTokenExpiredResponse } from "./token";
+import { getAccessToken, softExpireKisToken, isKisTokenExpiredResponse } from "./token";
 import { waitKisThrottle, releaseKisThrottle } from "./throttle";
 import { kisCacheGet, kisCacheSet, KIS_CACHE_TTL_PRICE_MS, KIS_CACHE_TTL_FUND_MS } from "./cache";
 import { getBaseUrl } from "./config";
@@ -13,85 +13,87 @@ export async function getCurrentPrice(tickerCode: string): Promise<number | null
     return null;
   }
 
-  const token = await getAccessToken();
-  if (!token) {
-    console.warn("[KIS] 단계5: 토큰 없음 (KIS_APP_KEY/KIS_APP_SECRET 또는 토큰 발급 실패)");
-    return null;
-  }
+  const cacheKey = `currentPrice:${code}`;
+  const cached = kisCacheGet<number>(cacheKey);
+  if (cached != null) return cached;
 
-  const appkey = process.env.KIS_APP_KEY;
-  const appsecret = process.env.KIS_APP_SECRET;
-  if (!appkey || !appsecret) {
-    console.warn("[KIS] 단계5: KIS_APP_KEY 또는 KIS_APP_SECRET 미설정");
-    return null;
-  }
+  await waitKisThrottle();
+  try {
+    const token = await getAccessToken();
+    if (!token) {
+      console.warn("[KIS] 단계5: 토큰 없음 (KIS_APP_KEY/KIS_APP_SECRET 또는 토큰 발급 실패)");
+      return null;
+    }
 
-  const baseUrl = getBaseUrl();
-  const isVps = baseUrl.includes("openapivts");
-  const trId = isVps ? "VFHKST01010100" : "FHKST01010100";
-  const url = `${baseUrl}/uapi/domestic-stock/v1/quotations/inquire-price?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=${encodeURIComponent(code)}`;
+    const appkey = process.env.KIS_APP_KEY;
+    const appsecret = process.env.KIS_APP_SECRET;
+    if (!appkey || !appsecret) {
+      console.warn("[KIS] 단계5: KIS_APP_KEY 또는 KIS_APP_SECRET 미설정");
+      return null;
+    }
 
-  let res = await fetch(url, {
-    method: "GET",
-    headers: {
-      "Content-Type": "application/json",
-      authorization: `Bearer ${token}`,
-      appkey,
-      appsecret,
-      tr_id: trId,
-      custtype: "P",
-    },
-  });
+    const baseUrl = getBaseUrl();
+    const isVps = baseUrl.includes("openapivts");
+    const trId = isVps ? "VFHKST01010100" : "FHKST01010100";
+    const url = `${baseUrl}/uapi/domestic-stock/v1/quotations/inquire-price?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=${encodeURIComponent(code)}`;
 
-  let bodyText = await res.text();
-
-  if (!res.ok && res.status === 500 && isKisTokenExpiredResponse(bodyText)) {
-    clearKisTokenCache();
-    const newToken = await getAccessToken();
-    if (newToken) {
-      res = await fetch(url, {
+    const doFetch = (t: string) =>
+      fetch(url, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
-          authorization: `Bearer ${newToken}`,
+          authorization: `Bearer ${t}`,
           appkey,
           appsecret,
           tr_id: trId,
           custtype: "P",
         },
       });
-      bodyText = await res.text();
+
+    let res = await doFetch(token);
+    let bodyText = await res.text();
+
+    if (!res.ok && res.status === 500 && isKisTokenExpiredResponse(bodyText)) {
+      softExpireKisToken();
+      const newToken = await getAccessToken();
+      if (newToken) {
+        res = await doFetch(newToken);
+        bodyText = await res.text();
+      }
     }
-  }
 
-  if (!res.ok) {
-    console.error("[KIS] 단계5: inquire-price HTTP 실패 code=%s status=%s body=%s", code, res.status, bodyText);
-    return null;
-  }
+    if (!res.ok) {
+      console.error("[KIS] 단계5: inquire-price HTTP 실패 code=%s status=%s body=%s", code, res.status, bodyText);
+      return null;
+    }
 
-  let json: { output?: { stck_prpr?: string }; rt_cd?: string; msg_cd?: string };
-  try {
-    json = JSON.parse(bodyText) as typeof json;
-  } catch {
-    console.error("[KIS] 단계5: 응답 JSON 파싱 실패 code=%s", code);
-    return null;
+    let json: { output?: { stck_prpr?: string }; rt_cd?: string; msg_cd?: string };
+    try {
+      json = JSON.parse(bodyText) as typeof json;
+    } catch {
+      console.error("[KIS] 단계5: 응답 JSON 파싱 실패 code=%s", code);
+      return null;
+    }
+    const rtCd = json.rt_cd ?? json.msg_cd;
+    if (rtCd && rtCd !== "0") {
+      console.warn("[KIS] 단계5: API 응답 오류 code=%s rt_cd=%s", code, rtCd);
+      return null;
+    }
+    const prpr = json.output?.stck_prpr;
+    if (prpr == null || prpr === "") {
+      console.warn("[KIS] 단계5: 현재가 없음( output.stck_prpr ) code=%s", code);
+      return null;
+    }
+    const num = Number(String(prpr).replace(/,/g, ""));
+    if (Number.isNaN(num)) {
+      console.warn("[KIS] 단계5: 현재가 파싱 실패 code=%s prpr=%s", code, prpr);
+      return null;
+    }
+    kisCacheSet(cacheKey, num, KIS_CACHE_TTL_PRICE_MS);
+    return num;
+  } finally {
+    releaseKisThrottle();
   }
-  const rtCd = json.rt_cd ?? json.msg_cd;
-  if (rtCd && rtCd !== "0") {
-    console.warn("[KIS] 단계5: API 응답 오류 code=%s rt_cd=%s", code, rtCd);
-    return null;
-  }
-  const prpr = json.output?.stck_prpr;
-  if (prpr == null || prpr === "") {
-    console.warn("[KIS] 단계5: 현재가 없음( output.stck_prpr ) code=%s", code);
-    return null;
-  }
-  const num = Number(String(prpr).replace(/,/g, ""));
-  if (Number.isNaN(num)) {
-    console.warn("[KIS] 단계5: 현재가 파싱 실패 code=%s prpr=%s", code, prpr);
-    return null;
-  }
-  return num;
 }
 
 export async function getPriceInfo(tickerCode: string): Promise<KisPriceInfo | null> {
@@ -131,7 +133,7 @@ export async function getPriceInfo(tickerCode: string): Promise<KisPriceInfo | n
     let res = await doFetch(token);
     let bodyText = await res.text();
     if (!res.ok && res.status === 500 && isKisTokenExpiredResponse(bodyText)) {
-      clearKisTokenCache();
+      softExpireKisToken();
       const newToken = await getAccessToken();
       if (newToken) {
         res = await doFetch(newToken);
@@ -217,7 +219,7 @@ export async function getDailyChart(
     let res = await doFetch(token);
     let bodyText = await res.text();
     if (!res.ok && res.status === 500 && isKisTokenExpiredResponse(bodyText)) {
-      clearKisTokenCache();
+      softExpireKisToken();
       const newToken = await getAccessToken();
       if (newToken) {
         res = await doFetch(newToken);

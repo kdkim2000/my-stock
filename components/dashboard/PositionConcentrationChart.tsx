@@ -15,16 +15,16 @@ import { usePortfolioSummary } from "@/hooks/usePortfolioSummary";
 
 const MAX_BARS = 10;
 const BAR_COLORS = [
-  "hsl(217, 91%, 60%)",
-  "hsl(142, 76%, 36%)",
-  "hsl(38, 92%, 50%)",
-  "hsl(280, 67%, 58%)",
-  "hsl(0, 84%, 60%)",
-  "hsl(190, 90%, 40%)",
-  "hsl(330, 81%, 60%)",
-  "hsl(50, 100%, 45%)",
-  "hsl(170, 70%, 40%)",
-  "hsl(260, 60%, 55%)",
+  "hsl(var(--chart-1))",
+  "hsl(var(--chart-2))",
+  "hsl(var(--chart-3))",
+  "hsl(var(--chart-4))",
+  "hsl(var(--chart-5))",
+  "hsl(var(--chart-1) / 0.7)",
+  "hsl(var(--chart-2) / 0.7)",
+  "hsl(var(--chart-3) / 0.7)",
+  "hsl(var(--chart-4) / 0.7)",
+  "hsl(var(--chart-5) / 0.7)",
 ];
 
 export function PositionConcentrationChart() {

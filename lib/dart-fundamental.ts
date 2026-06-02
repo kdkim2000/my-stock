@@ -117,9 +117,35 @@ export interface FundamentalFinancialsResponse {
 /** DART reprt_code: 3Q → 2Q → 1Q → 연간 순으로 최신 분기 데이터 우선 */
 const REPRT_CODE_FALLBACK = ["11014", "11012", "11013", "11011"] as const;
 
+/** 단일 연도의 재무 데이터를 분기 폴백 순서로 조회 (연도 내 순차, 연도 간 병렬용) */
+async function fetchYearData(
+  corpCode: string,
+  y: number
+): Promise<FundamentalYearData | null> {
+  let usedReprt = "";
+  for (const reprtCode of REPRT_CODE_FALLBACK) {
+    const list = await getFnlttSinglAcnt(corpCode, String(y), reprtCode);
+    if (list.length > 0) {
+      usedReprt = reprtCode;
+      if (process.env.NODE_ENV === "development") {
+        console.log("[DART] getDartTrendOnly year=%s reprt=%s", y, usedReprt);
+      }
+      return {
+        year: String(y),
+        balanceSheet: pickFromList(list, BS_KEYS) as FundamentalBalanceSheet,
+        incomeStatement: pickFromList(list, IS_KEYS) as FundamentalIncomeStatement,
+        cashFlow: pickFromList(list, CF_KEYS) as FundamentalCashFlow,
+      };
+    }
+  }
+  return null;
+}
+
 /**
  * 최근 5개년 재무 트렌드 전용. 연도별로 11014(3Q)→11012(2Q)→11013(1Q)→11011(연간) 순으로 시도해
  * 데이터가 있는 가장 최신 분기 리포트만 사용.
+ *
+ * 성능: 5개 연도를 병렬 조회 (연도 내 분기 폴백은 순차 유지).
  */
 export async function getDartTrendOnly(
   stockCode: string
@@ -131,34 +157,11 @@ export async function getDartTrendOnly(
   if (!corpCode) return null;
 
   const year = new Date().getFullYear();
-  const multiYear: FundamentalYearData[] = [];
+  const years = Array.from({ length: 5 }, (_, i) => year - i);
 
-  for (let y = year; y >= year - 4; y--) {
-    let list: Awaited<ReturnType<typeof getFnlttSinglAcnt>> = [];
-    let usedReprt = "";
-    for (const reprtCode of REPRT_CODE_FALLBACK) {
-      list = await getFnlttSinglAcnt(corpCode, String(y), reprtCode);
-      if (list.length > 0) {
-        usedReprt = reprtCode;
-        break;
-      }
-    }
-    if (list.length === 0) continue;
-
-    const balanceSheet = pickFromList(list, BS_KEYS) as FundamentalBalanceSheet;
-    const incomeStatement = pickFromList(list, IS_KEYS) as FundamentalIncomeStatement;
-    const cashFlow = pickFromList(list, CF_KEYS) as FundamentalCashFlow;
-
-    multiYear.push({
-      year: String(y),
-      balanceSheet,
-      incomeStatement,
-      cashFlow,
-    });
-    if (process.env.NODE_ENV === "development" && usedReprt) {
-      console.log("[DART] getDartTrendOnly year=%s reprt=%s", y, usedReprt);
-    }
-  }
+  // 5개 연도를 병렬로 조회 — 각 연도 내 분기 폴백은 fetchYearData 내에서 순차 유지
+  const results = await Promise.all(years.map((y) => fetchYearData(corpCode, y)));
+  const multiYear = results.filter((r): r is FundamentalYearData => r !== null);
 
   if (multiYear.length === 0) return null;
 
@@ -167,6 +170,8 @@ export async function getDartTrendOnly(
 
 /**
  * DART fnlttSinglAcnt로 B/S, I/S, C/F 추출 (최근 5개년)
+ *
+ * 성능: 5개 연도를 병렬 조회.
  */
 export async function getFundamentalFinancials(
   stockCode: string
@@ -178,27 +183,10 @@ export async function getFundamentalFinancials(
   if (!corpCode) return null;
 
   const year = new Date().getFullYear();
-  const multiYear: FundamentalYearData[] = [];
+  const years = Array.from({ length: 5 }, (_, i) => year - i);
 
-  for (let y = year; y >= year - 4; y--) {
-    let list: Awaited<ReturnType<typeof getFnlttSinglAcnt>> = [];
-    for (const reprtCode of REPRT_CODE_FALLBACK) {
-      list = await getFnlttSinglAcnt(corpCode, String(y), reprtCode);
-      if (list.length > 0) break;
-    }
-    if (list.length === 0) continue;
-
-    const balanceSheet = pickFromList(list, BS_KEYS) as FundamentalBalanceSheet;
-    const incomeStatement = pickFromList(list, IS_KEYS) as FundamentalIncomeStatement;
-    const cashFlow = pickFromList(list, CF_KEYS) as FundamentalCashFlow;
-
-    multiYear.push({
-      year: String(y),
-      balanceSheet,
-      incomeStatement,
-      cashFlow,
-    });
-  }
+  const results = await Promise.all(years.map((y) => fetchYearData(corpCode, y)));
+  const multiYear = results.filter((r): r is FundamentalYearData => r !== null);
 
   if (multiYear.length === 0) return null;
 

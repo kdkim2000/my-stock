@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { badRequest, serverError } from "@/lib/api-response";
 import { getKisInvestorTradeDaily, getKisDailyTradeVolume } from "@/lib/kis-api";
 import type { KisTradingTrendRow } from "@/types/api";
 import { readTickerCache, writeTickerCache } from "@/lib/ticker-cache";
@@ -24,10 +25,7 @@ export async function GET(
   const code = searchParams.get("code")?.trim();
   const revalidate = searchParams.get("revalidate") === "1";
   if (!code || !/^\d{6}$/.test(code) || code === "000000") {
-    return NextResponse.json(
-      { error: "code required (6-digit stock code, 000000 invalid)" },
-      { status: 400 }
-    );
+    return badRequest("code required (6-digit stock code, 000000 invalid)");
   }
 
   // ★ Google Sheets 캐시 확인
@@ -69,7 +67,6 @@ export async function GET(
       },
     });
   } catch (e) {
-    console.error("[fundamental/trading] error:", e);
-    return NextResponse.json({ error: "Failed to fetch trading data" }, { status: 503 });
+    return serverError("Failed to fetch trading data", e);
   }
 }

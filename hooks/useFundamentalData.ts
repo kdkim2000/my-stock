@@ -22,6 +22,7 @@ export function useFundamentalData(code: string, revalidateTrigger = 0) {
     },
     enabled: hasCode,
     staleTime: FUNDAMENTAL_STALE_MS,
+    refetchOnWindowFocus: false,
   });
 
   const data = query.data ?? null;

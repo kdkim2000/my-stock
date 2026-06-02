@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import { getTransactions } from "@/lib/google-sheets";
 import {
   computePortfolioSummaryFromTransactions,
   enrichPortfolioSummaryWithKis,
 } from "@/lib/portfolio-summary";
+import { ok, serverError } from "@/lib/api-response";
 import type { PortfolioSummaryResponse } from "@/types/api";
 
 /**
@@ -15,9 +16,8 @@ export async function GET(): Promise<NextResponse<PortfolioSummaryResponse | { e
     const transactions = await getTransactions();
     const summary = computePortfolioSummaryFromTransactions(transactions);
     const enriched = await enrichPortfolioSummaryWithKis(summary);
-    return NextResponse.json(enriched);
+    return ok(enriched);
   } catch (e) {
-    console.error(e);
-    return NextResponse.json({ error: "Failed to fetch portfolio summary" }, { status: 503 });
+    return serverError("Failed to fetch portfolio summary", e);
   }
 }

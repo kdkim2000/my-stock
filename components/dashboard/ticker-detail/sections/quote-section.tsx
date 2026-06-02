@@ -1,10 +1,11 @@
 import React from "react";
 import { TrendingUp } from "lucide-react";
 import { formatFundamentalNum } from "../utils";
+import type { KisPriceInfo, TickerDetailInfo } from "@/types/api";
 
 interface QuoteSectionProps {
-  priceInfo?: any;
-  info?: any;
+  priceInfo?: KisPriceInfo | null;
+  info?: Pick<TickerDetailInfo, "weekly52High" | "weekly52Low"> | null;
 }
 
 export function QuoteSection({ priceInfo, info }: QuoteSectionProps) {

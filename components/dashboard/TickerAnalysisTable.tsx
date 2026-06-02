@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useAnalysisSummary } from "@/hooks/useAnalysisSummary";
+import { TableSkeleton } from "@/components/ui/table-skeleton";
 import { usePortfolioSummary } from "@/hooks/usePortfolioSummary";
 import type { TickerAnalysisRow } from "@/types/api";
 
@@ -91,11 +92,7 @@ export function TickerAnalysisTable() {
   };
 
   if (analysis.isPending || portfolio.isPending) {
-    return (
-      <div className="py-12 text-center text-muted-foreground text-sm">
-        로딩 중…
-      </div>
-    );
+    return <TableSkeleton rows={6} cols={6} className="py-2" />;
   }
   if (analysis.error) {
     return (

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { badRequest, serverError } from "@/lib/api-response";
 import { getPriceInfo, getKisStockFundamentals } from "@/lib/kis-api";
 
 export interface ValuationResponse {
@@ -23,10 +24,7 @@ export async function GET(
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code")?.trim();
   if (!code || !/^\d{6}$/.test(code)) {
-    return NextResponse.json(
-      { error: "code required (6-digit stock code)" },
-      { status: 400 }
-    );
+    return badRequest("code required (6-digit stock code)");
   }
 
   try {
@@ -61,10 +59,6 @@ export async function GET(
       }
     );
   } catch (e) {
-    console.error("[fundamental/valuation] error:", e);
-    return NextResponse.json(
-      { error: "Failed to fetch valuation" },
-      { status: 503 }
-    );
+    return serverError("Failed to fetch valuation", e);
   }
 }

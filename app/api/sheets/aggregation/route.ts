@@ -1,18 +1,15 @@
-import { NextResponse } from "next/server";
 import { getTickerAggregation } from "@/lib/google-sheets";
+import { ok, serverError } from "@/lib/api-response";
+import type { NextResponse } from "next/server";
 
 /**
  * 종목별 집계 시트 조회 (GOOGLE_SHEET_AGGREGATION). 미설정 시 [].
  */
-export async function GET() {
+export async function GET(): Promise<NextResponse> {
   try {
     const rows = await getTickerAggregation();
-    return NextResponse.json({ rows });
+    return ok({ rows });
   } catch (e) {
-    console.error(e);
-    return NextResponse.json(
-      { error: "Failed to fetch ticker aggregation" },
-      { status: 503 }
-    );
+    return serverError("Failed to fetch ticker aggregation", e);
   }
 }

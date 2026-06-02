@@ -138,6 +138,17 @@ export function clearKisTokenCache(): void {
   }
 }
 
+/**
+ * HTTP 500 토큰 만료 오류 전용 — 토큰 값만 만료 처리.
+ * refreshPromise·fileReadPromise·파일은 유지하여 동시 다발 오류 시
+ * 여러 인스턴스가 각자 토큰을 발급받는 경합 조건을 방지한다.
+ */
+export function softExpireKisToken(): void {
+  cachedToken = null;
+  const gl = getGlobal();
+  gl.cachedToken = null;
+}
+
 export function isKisTokenExpiredResponse(bodyText: string): boolean {
   try {
     const j = JSON.parse(bodyText) as { msg_cd?: string; msg1?: string };

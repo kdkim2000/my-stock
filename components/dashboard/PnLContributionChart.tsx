@@ -15,8 +15,8 @@ import {
 import { usePortfolioSummary } from "@/hooks/usePortfolioSummary";
 
 const MAX_BARS = 12;
-const PROFIT_COLOR = "hsl(0, 84%, 60%)";
-const LOSS_COLOR = "hsl(217, 91%, 60%)";
+const PROFIT_COLOR = "hsl(var(--color-profit))";
+const LOSS_COLOR = "hsl(var(--color-loss))";
 
 export function PnLContributionChart() {
   const { data, isPending, error } = usePortfolioSummary();

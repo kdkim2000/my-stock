@@ -1,23 +1,14 @@
 "use client";
 
-import { useState, useMemo, useCallback, useRef, memo, Fragment, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "next/link";
-import { apiFetch } from "@/lib/api-client";
+import { useState, useMemo, useCallback, memo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAnalysisSummary } from "@/hooks/useAnalysisSummary";
 import { usePortfolioSummary } from "@/hooks/usePortfolioSummary";
 import { useSheetData } from "@/hooks/useSheetData";
-import { useFundamentalData } from "@/hooks/useFundamentalData";
-import { useFundamentalExtended } from "@/hooks/useFundamentalExtended";
-import type {
-  TickerDetailInfo,
-  TechnicalIndicatorsResponse,
-  KisInvestmentOpinion,
-} from "@/types/api";
+import { useTickerDetailQueries } from "@/hooks/useTickerDetailQueries";
+import { useAiGuidance } from "@/hooks/useAiGuidance";
 
-import {
-  formatRatioVal,
-} from "./ticker-detail/utils";
+import { formatRatioVal } from "./ticker-detail/utils";
 
 import { TickerDetailHeader } from "./ticker-detail/header";
 import { QuoteSection } from "./ticker-detail/sections/quote-section";
@@ -32,64 +23,21 @@ import { PortfolioSection } from "./ticker-detail/sections/portfolio-section";
 import { IndicatorsSection } from "./ticker-detail/sections/indicators-section";
 import { AiGuideSection } from "./ticker-detail/sections/ai-guide-section";
 import { JournalSection } from "./ticker-detail/sections/journal-section";
-const STALE_TIME_DETAIL_MS = 30 * 60 * 1000; // 상세정보 메모이제이션: 30분간 캐시 유지
 
 function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
-  const isCode = /^\d{6}$/.test(tickerOrCode);
   const [revalidateTrigger, setRevalidateTrigger] = useState(0);
   const queryClient = useQueryClient();
 
-  const stockInfoQuery = useQuery<TickerDetailInfo>({
-    queryKey: ["kis", "stock-info", tickerOrCode],
-    queryFn: async () => {
-      const url = isCode
-        ? `/api/kis/stock-info?code=${encodeURIComponent(tickerOrCode)}`
-        : `/api/kis/stock-info?ticker=${encodeURIComponent(tickerOrCode)}`;
-      const res = await apiFetch(url);
-      if (!res.ok) throw new Error("Failed to fetch stock info");
-      return res.json();
-    },
-    enabled: !!tickerOrCode,
-    staleTime: STALE_TIME_DETAIL_MS,
-  });
-
-  /**
-   * ★ Waterfall 제거: tickerOrCode가 6자리 코드면 stock-info 완료를 기다리지 않고
-   *   즉시 fundamental 쿼리를 시작합니다.
-   *   ticker(문자열)인 경우만 stock-info 응답에서 code를 얻어야 합니다.
-   */
-  const code = isCode
-    ? tickerOrCode
-    : (stockInfoQuery.data?.code ?? "");
-
-  const fundamentalData = useFundamentalData(code, revalidateTrigger);
-  /** 분리된 느린 지표(비율·추정실적·매매동향) — 독립적으로 로딩(방안 2) */
-  const extended = useFundamentalExtended(code, revalidateTrigger);
-
-
-  const indicatorsQuery = useQuery<TechnicalIndicatorsResponse>({
-    queryKey: ["kis", "indicators", code ?? "", revalidateTrigger],
-    queryFn: async () => {
-      const revalidate = revalidateTrigger > 0 ? "&revalidate=1" : "";
-      const res = await apiFetch(`/api/kis/indicators?code=${encodeURIComponent(code!)}${revalidate}`);
-      if (!res.ok) throw new Error("Failed to fetch indicators");
-      return res.json();
-    },
-    enabled: !!code,
-    staleTime: STALE_TIME_DETAIL_MS,
-  });
-
-  const opinionQuery = useQuery<KisInvestmentOpinion>({
-    queryKey: ["kis", "opinion", code, revalidateTrigger],
-    queryFn: async () => {
-      const revalidate = revalidateTrigger > 0 ? "&revalidate=1" : "";
-      const res = await apiFetch(`/api/kis/opinion?code=${encodeURIComponent(code!)}${revalidate}`);
-      if (!res.ok) throw new Error("Failed to fetch opinion");
-      return res.json();
-    },
-    enabled: !!code && /^\d{6}$/.test(code),
-    staleTime: STALE_TIME_DETAIL_MS,
-  });
+  // code 계산 및 모든 데이터 쿼리를 useTickerDetailQueries로 위임
+  const {
+    code,
+    stockInfoQuery,
+    fundamentalData,
+    indicatorsQuery,
+    opinionQuery,
+    mergedFundamental,
+    isRefreshing,
+  } = useTickerDetailQueries({ tickerOrCode, revalidateTrigger });
 
   const analysis = useAnalysisSummary();
   const portfolio = usePortfolioSummary();
@@ -227,56 +175,13 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
       undefined,
     [stockInfoQuery.data?.priceInfo, fundamentalData.kis?.priceInfo]
   );
-  /**
-   * 분리된 ratios/estimate/trading 데이터를 fundamentalData.kis 에 병합합니다.
-   * 섹션 컴포넌트의 props 구조(fundamentalData.kis.XXX)를 그대로 유지하면서
-   * 각 섹션이 도착하는 즉시 화면에 표시됩니다(점진적 로딩).
-   */
-  const mergedFundamental = useMemo(() => {
-    const base = fundamentalData;
-    // extended 데이터가 아직 없으면 base 그대로 반환
-    const ratiosData = extended.ratios.data;
-    const estimateData = extended.estimate.data;
-    const tradingData = extended.trading.data;
-    const hasExtended = ratiosData || estimateData || tradingData;
-    if (!hasExtended) return base;
-    return {
-      ...base,
-      // extended 로딩 중 여부를 isPending 에 반영
-      isPending: base.isPending,
-      isRefetching: base.isRefetching || extended.isRefetching,
-      kis: base.kis
-        ? {
-            ...base.kis,
-            // 비율
-            financialRatio: ratiosData?.financialRatio ?? base.kis.financialRatio,
-            profitRatio: ratiosData?.profitRatio ?? base.kis.profitRatio,
-            stabilityRatio: ratiosData?.stabilityRatio ?? base.kis.stabilityRatio,
-            growthRatio: ratiosData?.growthRatio ?? base.kis.growthRatio,
-            otherMajorRatios: ratiosData?.otherMajorRatios ?? base.kis.otherMajorRatios,
-            // 추정실적
-            estimatePerform: estimateData?.estimatePerform ?? base.kis.estimatePerform,
-            // 매매동향
-            investorTradeDaily: tradingData?.investorTradeDaily ?? base.kis.investorTradeDaily ?? [],
-            dailyTradeVolume: tradingData?.dailyTradeVolume ?? base.kis.dailyTradeVolume ?? [],
-          }
-        : base.kis,
-    };
-  }, [fundamentalData, extended.ratios.data, extended.estimate.data, extended.trading.data, extended.isRefetching]);
-
   const hasPosition = (position?.quantity ?? 0) > 0;
-  const isRefreshing =
-    stockInfoQuery.isRefetching ||
-    fundamentalData.isRefetching ||
-    extended.isRefetching ||
-    indicatorsQuery.isRefetching ||
-    opinionQuery.isRefetching;
 
   const handleRefresh = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["kis", "stock-info", tickerOrCode] });
     void queryClient.refetchQueries({ queryKey: ["kis", "stock-info", tickerOrCode] });
     if (code && /^\d{6}$/.test(code)) {
-      setRevalidateTrigger((t) => t + 1); // fundamental·opinion: 새 queryKey로 revalidate=1 전달
+      setRevalidateTrigger((t) => t + 1);
       queryClient.invalidateQueries({ queryKey: ["fundamental", code] });
       queryClient.invalidateQueries({ queryKey: ["kis", "indicators", code] });
       queryClient.invalidateQueries({ queryKey: ["kis", "opinion", code] });
@@ -284,74 +189,8 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
     }
   }, [queryClient, tickerOrCode, code]);
 
-  /** AI 분석 결과: 서버 캐시(Google Sheets) 우선 → 없으면 OpenAI 호출 */
-  const aiForceRef = useRef(false);
-  const [aiQueryEnabled, setAiQueryEnabled] = useState(true);
-
-  const aiGuideQuery = useQuery({
-    queryKey: ["ai", "trading-guide", code],
-    queryFn: async () => {
-      const isForce = aiForceRef.current;
-      const body: {
-        code: string;
-        ticker: string;
-        force?: boolean;
-        cacheOnly?: boolean;
-        context?: { detailSummary: string; journalEntries: unknown[] };
-      } = {
-        code,
-        ticker,
-        force: isForce,
-        cacheOnly: !isForce,
-      };
-
-      if (isForce && aiContext.detailSummary.trim()) {
-        body.context = {
-          detailSummary: aiContext.detailSummary,
-          journalEntries: aiContext.journalEntries,
-        };
-      }
-
-      const res = await apiFetch("/api/ai/trading-guide", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = (await res.json()) as { content?: string; cachedAt?: string; error?: string };
-      if (!res.ok) throw new Error(data.error ?? "요청 실패");
-
-      // 호출 완료 후 플래그 초기화
-      aiForceRef.current = false;
-      return { content: data.content ?? null, cachedAt: data.cachedAt ?? null };
-    },
-    enabled: !!code && aiQueryEnabled,
-    staleTime: 5 * 60 * 1000,
-    gcTime: 15 * 60 * 1000,
-  });
-
-  const aiContent = aiGuideQuery.data?.content ?? null;
-  const aiCachedAt = aiGuideQuery.data?.cachedAt ?? null;
-  const aiError = aiGuideQuery.error?.message ?? null;
-  const aiLoading = aiGuideQuery.isFetching;
-
-  /** 캐시 있으면 재요청 생략(토큰 절약). "AI 분석 요청" 버튼 클릭 시에는 OpenAI 분석 수행 */
-  const requestAiGuide = useCallback(
-    () => {
-      if (!code) return;
-      // 이미 내용이 있으면(캐시 히트) 중복 요청 방지
-      if (aiGuideQuery.data?.content) return;
-
-      aiForceRef.current = true; // 버튼 클릭 시에는 OpenAI 분석 수행
-      void aiGuideQuery.refetch();
-    },
-    [code, aiGuideQuery.data?.content, aiGuideQuery.refetch]
-  );
-
-  const requestAiGuideRefresh = useCallback(() => {
-    if (!code) return;
-    aiForceRef.current = true; // OpenAI 강제 재호출
-    void aiGuideQuery.refetch();
-  }, [code, aiGuideQuery.refetch]);
+  const { aiContent, aiCachedAt, aiError, aiAuthError, aiLoading, requestAiGuide, requestAiGuideRefresh } =
+    useAiGuidance({ code, ticker, aiContext });
 
   if (!tickerOrCode) {
     return (
@@ -397,6 +236,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
       <AiGuideSection
         aiLoading={aiLoading}
         aiError={aiError}
+        aiAuthError={aiAuthError}
         aiContent={aiContent}
         aiCachedAt={aiCachedAt}
         code={code}

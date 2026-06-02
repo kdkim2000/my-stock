@@ -1,5 +1,5 @@
-import { createSign } from "crypto";
 import { readFile } from "fs/promises";
+import { getAccessTokenFromServiceAccount } from "./google-oauth";
 import { normalizeRows } from "./normalize-row";
 import type {
   SheetTransactionRow,
@@ -8,101 +8,7 @@ import type {
   TickerAggregationRow,
 } from "@/types/sheet";
 
-const SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 const SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
-const TOKEN_AUDIENCE = "https://oauth2.googleapis.com/token";
-
-function base64urlEncode(buf: Buffer): string {
-  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-/** Google OAuth 토큰 캐시 (globalThis 공유 — token-store.ts와 동일 키 사용) */
-const GTOKEN_CACHE_KEY = "__GOOGLE_SHEETS_TOKEN_CACHE__" as const;
-const GTOKEN_BUFFER_MS = 5 * 60 * 1000;
-
-type GTokenCache = {
-  token: string;
-  expiresAt: number;
-  promise: Promise<string | null> | null;
-};
-
-function getGTokenCache(): GTokenCache {
-  const g = globalThis as unknown as Record<string, GTokenCache>;
-  if (!g[GTOKEN_CACHE_KEY]) {
-    g[GTOKEN_CACHE_KEY] = { token: "", expiresAt: 0, promise: null };
-  }
-  return g[GTOKEN_CACHE_KEY];
-}
-
-/** 서비스 계정 JWT 서명 후 Google OAuth2 토큰 엔드포인트에서 액세스 토큰 교환 (캐싱, google-auth-library 제거로 번들 경량화) */
-async function getAccessTokenFromServiceAccount(
-  clientEmail: string,
-  privateKeyPem: string
-): Promise<string> {
-  const cache = getGTokenCache();
-
-  // 캐시된 토큰이 유효하면 즉시 반환
-  if (cache.token && cache.expiresAt > Date.now()) {
-    return cache.token;
-  }
-
-  // 이미 갱신 중이면 같은 Promise를 대기
-  if (cache.promise) {
-    const result = await cache.promise;
-    if (result) return result;
-    throw new Error("Google OAuth2 token refresh failed (concurrent)");
-  }
-
-  cache.promise = (async (): Promise<string | null> => {
-    try {
-      const now = Math.floor(Date.now() / 1000);
-      const header = { alg: "RS256", typ: "JWT" };
-      const payload = {
-        iss: clientEmail,
-        scope: SCOPE,
-        aud: TOKEN_AUDIENCE,
-        iat: now,
-        exp: now + 3600,
-      };
-      const headerB64 = base64urlEncode(Buffer.from(JSON.stringify(header), "utf-8"));
-      const payloadB64 = base64urlEncode(Buffer.from(JSON.stringify(payload), "utf-8"));
-      const signatureInput = `${headerB64}.${payloadB64}`;
-      const sign = createSign("RSA-SHA256");
-      sign.update(signatureInput);
-      const sig = sign.sign(privateKeyPem);
-      const jwt = `${signatureInput}.${base64urlEncode(sig)}`;
-
-      const res = await fetch(TOKEN_AUDIENCE, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
-          assertion: jwt,
-        }).toString(),
-      });
-      if (!res.ok) {
-        const err = await res.text();
-        const msg = `Google OAuth2 token ${res.status}: ${err}`;
-        console.error("[Sheets] Service account token error:", msg);
-        return null;
-      }
-      const data = (await res.json()) as { access_token?: string };
-      if (!data.access_token) return null;
-      cache.token = data.access_token;
-      cache.expiresAt = Date.now() + 3600 * 1000 - GTOKEN_BUFFER_MS;
-      return data.access_token;
-    } catch (e) {
-      console.error("[Sheets] Service account token error:", e);
-      return null;
-    } finally {
-      cache.promise = null;
-    }
-  })();
-
-  const token = await cache.promise;
-  if (!token) throw new Error("Google OAuth2 response missing access_token");
-  return token;
-}
 
 function getSheetName(): string {
   return process.env.GOOGLE_SHEET_NAME ?? "Sheet1";
@@ -138,10 +44,8 @@ export async function getSheetsAuth(): Promise<Auth> {
         throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON must include client_email and private_key");
       }
       const projectId = creds.project_id ?? process.env.GOOGLE_CLOUD_PROJECT ?? "";
-      const token = await getAccessTokenFromServiceAccount(
-        creds.client_email,
-        creds.private_key
-      );
+      const token = await getAccessTokenFromServiceAccount(creds.client_email, creds.private_key);
+      if (!token) throw new Error("Google OAuth2 response missing access_token");
       return { token, projectId };
     } catch (e) {
       if (e instanceof SyntaxError) throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON is invalid JSON");
@@ -160,10 +64,8 @@ export async function getSheetsAuth(): Promise<Auth> {
       throw new Error("Key file must include client_email and private_key");
     }
     const projectId = creds.project_id ?? process.env.GOOGLE_CLOUD_PROJECT ?? "";
-    const token = await getAccessTokenFromServiceAccount(
-      creds.client_email,
-      creds.private_key
-    );
+    const token = await getAccessTokenFromServiceAccount(creds.client_email, creds.private_key);
+    if (!token) throw new Error("Google OAuth2 response missing access_token");
     return { token, projectId };
   }
   throw new Error(

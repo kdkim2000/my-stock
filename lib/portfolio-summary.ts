@@ -4,10 +4,9 @@ import { sortTransactionsByDate } from "./sort-transactions";
 import { getTickerCodeMap } from "./ticker-mapping";
 import { getCurrentPrice } from "./kis-api";
 import { PositionTracker } from "./position-tracker";
+import { normalizeStockCode } from "./stock-utils";
 
-/**
- * ticker → KIS 6자리 종목코드. codeMap은 getTickerCodeMap()으로 조회(마스터 시트 → 집계 시트 → 하드코딩 fallback).
- */
+/** ticker → KIS 6자리 종목코드. codeMap은 마스터 시트 → 집계 시트 → 하드코딩 fallback 순. */
 function resolveTickerToCodeWithMap(
   ticker: string,
   codeMap: Record<string, string>
@@ -18,16 +17,6 @@ function resolveTickerToCodeWithMap(
   const sixDigit = t.match(/^(\d{6})/)?.[1];
   if (sixDigit) return sixDigit;
   return codeMap[t] ?? undefined;
-}
-
-/** 종목코드 정규화: 공백 제거, 숫자만 있으면 6자리 앞 0 채우기. KIS API 호출 전 적용. */
-function normalizeTickerCode(code: string | undefined): string | undefined {
-  if (code == null) return undefined;
-  const s = String(code).trim();
-  if (!s) return undefined;
-  if (/^\d{6}$/.test(s)) return s;
-  if (/^\d+$/.test(s) && s.length <= 6) return s.padStart(6, "0");
-  return undefined;
 }
 
 /**
@@ -91,7 +80,7 @@ export async function enrichPortfolioSummaryWithKis(
         ? resolveTickerToCodeWithMap(trimmed, codeMap)
         : undefined;
       const codeBeforeNormalize = code;
-      code = normalizeTickerCode(code);
+      code = normalizeStockCode(code);
       if (needCurrentPrice && code == null) {
         if (codeBeforeNormalize == null || codeBeforeNormalize === "") {
           console.warn("[평가손익] 단계3/4: 종목코드 없음 (마스터·집계 시트 또는 하드코딩에 ticker 없음) ticker=%s", trimmed);

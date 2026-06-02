@@ -12,6 +12,8 @@ export async function middleware(request: NextRequest) {
   if (!isAuthenticated) {
     const isAuthRoute =
       request.nextUrl.pathname.startsWith("/api/auth/") ||
+      // /api/ai/* 는 라우트 핸들러에서 getServerSession으로 직접 검증
+      request.nextUrl.pathname.startsWith("/api/ai/") ||
       request.nextUrl.pathname === "/auth/signin";
 
     if (isAuthRoute) return NextResponse.next();
