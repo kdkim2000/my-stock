@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
-import { badRequest, serverError } from "@/lib/api-response";
+import { NextResponse, NextRequest } from "next/server";
+import { getToken } from "next-auth/jwt";
+import { badRequest, serverError, unauthorized } from "@/lib/api-response";
 import OpenAI from "openai";
 import { readAiCache, writeAiCache } from "@/lib/ai-cache";
 import { getPriceInfo, getKisFinancialRatio, getInvestmentOpinion, getDailyChart } from "@/lib/kis-api";
@@ -56,6 +57,15 @@ function formatJournalForPrompt(
 }
 
 export async function POST(request: Request) {
+  // getToken: 쿠키에서 JWT 직접 복호화 (내부 HTTP 호출 없음 — NEXTAUTH_URL 불필요)
+  const token = await getToken({
+    req: new NextRequest(request.url, { headers: request.headers }),
+    secret: process.env.AUTH_SECRET,
+  });
+  if (!token) {
+    return unauthorized("로그인이 필요합니다.");
+  }
+
   let body: {
     code?: string;
     ticker?: string;

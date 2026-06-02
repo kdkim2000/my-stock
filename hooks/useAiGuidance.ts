@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useCallback, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch, AuthError } from "@/lib/api-client";
 
@@ -19,7 +19,6 @@ export function useAiGuidance({
   aiContext: AiContext;
 }) {
   const aiForceRef = useRef(false);
-  const [aiQueryEnabled] = useState(true);
 
   const aiGuideQuery = useQuery({
     queryKey: ["ai", "trading-guide", code],
@@ -56,9 +55,10 @@ export function useAiGuidance({
       aiForceRef.current = false;
       return { content: data.content ?? null, cachedAt: data.cachedAt ?? null };
     },
-    enabled: !!code && aiQueryEnabled,
+    enabled: !!code,
     staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const requestAiGuide = useCallback(() => {
@@ -74,7 +74,10 @@ export function useAiGuidance({
   }, [code, aiGuideQuery.refetch]);
 
   const err = aiGuideQuery.error;
-  const isAuthError = err instanceof AuthError || (err as AuthError | null)?.isAuthError === true;
+  // 실제 API 401 응답(AuthError)만 인증 오류로 판정 — useSession 상태 의존 제거
+  const isAuthError =
+    err instanceof AuthError ||
+    (err as AuthError | null)?.isAuthError === true;
 
   return {
     aiContent: aiGuideQuery.data?.content ?? null,
