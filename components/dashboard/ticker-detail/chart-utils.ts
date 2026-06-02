@@ -196,31 +196,49 @@ export function ohlcYDomain(
 
 export function buildDailyOhlcChartData(
   rows: Record<string, unknown>[]
-): { date: string; dateLabel: string; open: number; high: number; low: number; close: number; bodyHigh: number; bodyLow: number; isUp: boolean }[] {
+): {
+  date: string; dateLabel: string;
+  open: number; high: number; low: number; close: number;
+  bodyHigh: number; bodyLow: number; isUp: boolean;
+  volume: number;
+  candleBottom: number; candleBodyHeight: number;
+}[] {
   const sorted = [...rows].sort((a, b) => {
     const da = String((a as Record<string, unknown>).stck_bsop_date ?? (a as Record<string, unknown>).date ?? "");
     const db = String((b as Record<string, unknown>).stck_bsop_date ?? (b as Record<string, unknown>).date ?? "");
     return dateStrToSortKey(da) - dateStrToSortKey(db);
   });
-  return sorted.map((r) => {
+
+  const points = sorted.map((r) => {
     const o = r as Record<string, unknown>;
-    const open = chartNum(o.stck_oprc);
-    const high = chartNum(o.stck_hgpr);
-    const low = chartNum(o.stck_lwpr);
+    const open  = chartNum(o.stck_oprc);
+    const high  = chartNum(o.stck_hgpr);
+    const low   = chartNum(o.stck_lwpr);
     const close = chartNum(o.stck_clpr);
+    const volume = chartNum(o.acml_vol);
     const bodyHigh = Math.max(open, close);
-    const bodyLow = Math.min(open, close);
-    const rawDate = String(o.stck_bsop_date ?? o.date ?? "");
-    return {
-      date: rawDate.length >= 8 ? `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}` : rawDate,
-      dateLabel: tradingDateLabel(rawDate || undefined),
-      open,
-      high,
-      low,
-      close,
-      bodyHigh,
-      bodyLow,
-      isUp: close >= open,
-    };
+    const bodyLow  = Math.min(open, close);
+    const rawDate  = String(o.stck_bsop_date ?? o.date ?? "");
+    return { rawDate, open, high, low, close, volume, bodyHigh, bodyLow };
   });
+
+  // doji(시가=종가) 시 캔들 몸통 높이가 0이 되면 스케일 계산 불가 → 최솟값 설정
+  const allHighs = points.map((p) => p.high);
+  const allLows  = points.map((p) => p.low);
+  const priceRange = allHighs.length > 0
+    ? Math.max(...allHighs) - Math.min(...allLows)
+    : 1;
+  const minBodyHeight = Math.max(priceRange * 0.001, 1);
+
+  return points.map(({ rawDate, open, high, low, close, volume, bodyHigh, bodyLow }) => ({
+    date: rawDate.length >= 8
+      ? `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}`
+      : rawDate,
+    dateLabel: tradingDateLabel(rawDate || undefined),
+    open, high, low, close, volume,
+    bodyHigh, bodyLow,
+    isUp: close >= open,
+    candleBottom: bodyLow,
+    candleBodyHeight: Math.max(bodyHigh - bodyLow, minBodyHeight),
+  }));
 }

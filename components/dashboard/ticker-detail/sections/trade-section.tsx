@@ -2,6 +2,7 @@ import React from "react";
 import { BarChart2 } from "lucide-react";
 import {
   ResponsiveContainer,
+  ComposedChart,
   LineChart,
   BarChart,
   CartesianGrid,
@@ -21,7 +22,46 @@ import {
 } from "../chart-utils";
 
 interface TradeSectionProps {
-  fundamentalData: any;
+  fundamentalData: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+}
+
+/** 캔들스틱 몸통 + 위아래 꼬리를 렌더링하는 커스텀 Recharts Bar shape */
+function CandlestickBar(props: {
+  x?: number; y?: number; width?: number; height?: number;
+  payload?: { high: number; low: number; bodyHigh: number; bodyLow: number; isUp: boolean };
+}) {
+  const { x = 0, y = 0, width = 0, height = 0, payload } = props;
+  if (!payload || width <= 0 || height <= 0) return null;
+
+  const { high, low, bodyHigh, bodyLow, isUp } = payload;
+  const color = isUp
+    ? "hsl(var(--color-profit))"
+    : "hsl(var(--color-loss))";
+
+  // 스택 바 결과: y = bodyHigh의 SVG y좌표, height = bodyHigh-bodyLow의 픽셀 높이
+  // 이를 이용해 high·low 위치를 역산 (픽셀/단위 스케일)
+  const bodyRange = bodyHigh - bodyLow;
+  const ppu = bodyRange > 0 ? height / bodyRange : 0; // pixels per price unit
+
+  const upperWickTop    = ppu > 0 ? y - (high - bodyHigh) * ppu : y;
+  const lowerWickBottom = ppu > 0 ? y + height + (bodyLow - low) * ppu : y + height;
+
+  const cx     = x + width / 2;
+  const bodyX  = x + Math.max(width * 0.15, 1);
+  const bodyW  = Math.max(width * 0.7, 2);
+  const bodyY  = y;
+  const bodyH  = Math.max(height, 1);
+
+  return (
+    <g>
+      {/* 위 꼬리 */}
+      <line x1={cx} x2={cx} y1={upperWickTop} y2={bodyY} stroke={color} strokeWidth={1.5} />
+      {/* 몸통 */}
+      <rect x={bodyX} y={bodyY} width={bodyW} height={bodyH} fill={color} />
+      {/* 아래 꼬리 */}
+      <line x1={cx} x2={cx} y1={bodyY + bodyH} y2={lowerWickBottom} stroke={color} strokeWidth={1.5} />
+    </g>
+  );
 }
 
 export function TradeSection({ fundamentalData }: TradeSectionProps) {
@@ -64,49 +104,91 @@ export function TradeSection({ fundamentalData }: TradeSectionProps) {
           const ohlcData = buildDailyOhlcChartData(dailyPrice as Record<string, unknown>[]);
           if (ohlcData.length === 0) return null;
           const [yMin, yMax] = ohlcYDomain(ohlcData);
+          const interval = Math.max(0, Math.floor(ohlcData.length / 8));
           return (
             <div>
-              <h3 className="text-sm font-medium text-muted-foreground mb-3">주식현재가 일자별 (최근 30일) — 시가·종가·고가·저가</h3>
-              <p className="text-xs text-muted-foreground mb-2">시가·종가·고가·저가 각각 연결 선차트</p>
-              <div className="h-72 w-full">
+              <h3 className="text-sm font-medium text-muted-foreground mb-1">주가 차트 (최근 30일) — 캔들스틱</h3>
+              <p className="text-xs text-muted-foreground mb-3">
+                <span className="inline-block w-2.5 h-2.5 rounded-sm mr-1 align-middle" style={{ background: "hsl(var(--color-profit))" }} />상승봉&nbsp;
+                <span className="inline-block w-2.5 h-2.5 rounded-sm mr-1 align-middle" style={{ background: "hsl(var(--color-loss))" }} />하락봉
+              </p>
+              <div className="h-80 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={ohlcData} margin={{ top: 10, right: 12, left: 12, bottom: 6 }}>
+                  <ComposedChart
+                    data={ohlcData}
+                    margin={{ top: 10, right: 12, left: 12, bottom: 6 }}
+                    barCategoryGap="20%"
+                  >
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted" vertical={false} />
                     <XAxis
                       dataKey="dateLabel"
                       tick={{ fontSize: 10 }}
-                      interval={Math.max(0, Math.floor(ohlcData.length / 8))}
+                      interval={interval}
                       axisLine={{ strokeWidth: 1 }}
+                      tickLine={false}
                     />
                     <YAxis
                       tick={{ fontSize: 10 }}
-                      tickFormatter={(v) => (v >= 10000 ? `${(v / 10000).toFixed(0)}만` : String(v))}
+                      tickFormatter={(v: number) => v >= 10000 ? `${(v / 10000).toFixed(0)}만` : String(v)}
                       domain={[yMin, yMax]}
-                      width={44}
+                      width={48}
                       axisLine={false}
-                      tickLine={true}
+                      tickLine={false}
+                      yAxisId="price"
+                    />
+                    <YAxis
+                      yAxisId="vol"
+                      orientation="right"
+                      hide
+                      // 거래량 축: 최댓값을 실제의 5배로 설정 → 하단 20%에만 표시
+                      domain={[0, (max: number) => max * 5]}
                     />
                     <Tooltip
                       content={({ active, payload }) => {
-                        if (!active || !payload?.[0]?.payload) return null;
-                        const p = payload[0].payload as (typeof ohlcData)[0];
+                        if (!active || !payload?.length) return null;
+                        const p = payload[0]?.payload as (typeof ohlcData)[0];
+                        if (!p) return null;
                         return (
-                          <div className="rounded-lg border bg-card px-3 py-2 text-xs shadow-md">
-                            <p className="font-medium text-foreground mb-1">{p.date}</p>
-                            <p>시가 {p.open.toLocaleString("ko-KR")}</p>
-                            <p>고가 {p.high.toLocaleString("ko-KR")}</p>
-                            <p>저가 {p.low.toLocaleString("ko-KR")}</p>
-                            <p>종가 {p.close.toLocaleString("ko-KR")}</p>
+                          <div className="rounded-lg border bg-card px-3 py-2 text-xs shadow-md space-y-0.5">
+                            <p className="font-semibold text-foreground mb-1">{p.date}</p>
+                            <p className="text-muted-foreground">시가 <span className="text-foreground font-medium">{p.open.toLocaleString("ko-KR")}</span></p>
+                            <p className="text-muted-foreground">고가 <span className="font-medium" style={{ color: "hsl(var(--color-profit))" }}>{p.high.toLocaleString("ko-KR")}</span></p>
+                            <p className="text-muted-foreground">저가 <span className="font-medium" style={{ color: "hsl(var(--color-loss))" }}>{p.low.toLocaleString("ko-KR")}</span></p>
+                            <p className="text-muted-foreground">종가 <span className="text-foreground font-medium">{p.close.toLocaleString("ko-KR")}</span></p>
+                            {p.volume > 0 && (
+                              <p className="text-muted-foreground pt-0.5 border-t border-border/40 mt-1">
+                                거래량 <span className="text-foreground">{p.volume.toLocaleString("ko-KR")}</span>
+                              </p>
+                            )}
                           </div>
                         );
                       }}
                     />
-                    <Legend />
-                    <Line type="monotone" dataKey="open" name="시가" stroke="hsl(var(--muted-foreground))" strokeWidth={1.5} dot={false} connectNulls />
-                    <Line type="monotone" dataKey="high" name="고가" stroke="hsl(var(--color-profit))" strokeWidth={1.5} dot={false} connectNulls />
-                    <Line type="monotone" dataKey="low" name="저가" stroke="hsl(var(--color-loss))" strokeWidth={1.5} dot={false} connectNulls />
-                    <Line type="monotone" dataKey="close" name="종가" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} connectNulls />
-                  </LineChart>
+                    {/* 거래량 바 (하단 20% 영역에 은은하게) */}
+                    <Bar
+                      yAxisId="vol"
+                      dataKey="volume"
+                      radius={[1, 1, 0, 0]}
+                      fill="hsl(var(--muted-foreground) / 0.25)"
+                      isAnimationActive={false}
+                    />
+                    {/* 캔들스틱: 투명 하단 스페이서 + 색상 몸통+꼬리 */}
+                    <Bar
+                      yAxisId="price"
+                      stackId="candle"
+                      dataKey="candleBottom"
+                      fill="transparent"
+                      stroke="none"
+                      isAnimationActive={false}
+                    />
+                    <Bar
+                      yAxisId="price"
+                      stackId="candle"
+                      dataKey="candleBodyHeight"
+                      shape={<CandlestickBar />}
+                      isAnimationActive={false}
+                    />
+                  </ComposedChart>
                 </ResponsiveContainer>
               </div>
             </div>
