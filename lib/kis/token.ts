@@ -11,9 +11,11 @@ const TOKEN_RETRY_AFTER_MS = 62 * 1000;
 const GLOBAL_KEY = "__KIS_TOKEN_CACHE__" as const;
 
 export type TokenEntry = { token: string; expiresAt: number };
+type FileReadResult = { token: string; expiresAt: number } | { cooldownUntil: number } | null;
 type GlobalCache = {
   cachedToken: TokenEntry | null;
   refreshPromise: Promise<string | null> | null;
+  fileReadPromise: Promise<FileReadResult> | null;
   tokenPCooldownUntil: number;
 };
 
@@ -23,6 +25,7 @@ function getGlobal(): GlobalCache {
     g[GLOBAL_KEY] = {
       cachedToken: null,
       refreshPromise: null,
+      fileReadPromise: null,
       tokenPCooldownUntil: 0,
     };
   }
@@ -104,8 +107,6 @@ async function writeTokenToFile(entry: TokenEntry | { cooldownUntil: number }): 
 let cachedToken: TokenEntry | null = null;
 let refreshPromise: Promise<string | null> | null = null;
 let tokenPCooldownUntil = 0;
-/** readTokenFromFile() 중복 호출 방지 싱글턴 */
-let fileReadPromise: Promise<{ token: string; expiresAt: number } | { cooldownUntil: number } | null> | null = null;
 
 function syncFromGlobalAndCheckExpired(): boolean {
   const gl = getGlobal();
@@ -125,11 +126,11 @@ export function isCachedTokenExpired(): boolean {
 export function clearKisTokenCache(): void {
   cachedToken = null;
   refreshPromise = null;
-  fileReadPromise = null;
   tokenPCooldownUntil = 0;
   const gl = getGlobal();
   gl.cachedToken = null;
   gl.refreshPromise = null;
+  gl.fileReadPromise = null;
   gl.tokenPCooldownUntil = 0;
   const p = getTokenCachePath();
   if (p && existsSync(p)) {
@@ -178,18 +179,21 @@ export async function getAccessToken(): Promise<string | null> {
     return getAccessToken();
   }
 
-  // 3단계: 파일/Sheets 읽기 (fileReadPromise 싱글턴으로 중복 실행 방지)
-  if (!fileReadPromise) {
-    fileReadPromise = readTokenFromFile().finally(() => {
-      fileReadPromise = null;
-    });
+  // 3단계: 파일/Sheets 읽기
+  //   globalThis에 fileReadPromise를 캐싱하여 동시 호출이 하나의 Sheets 읽기를 공유.
+  //   Promise가 resolve된 후에도 유지하여 재호출 시 Sheets를 다시 읽지 않음.
+  //   (토큰이 만료되거나 clearKisTokenCache() 호출 시에만 초기화됨)
+  if (!gl.fileReadPromise) {
+    gl.fileReadPromise = readTokenFromFile();
   }
-  const fileEntry = await fileReadPromise;
-  if (fileEntry && "token" in fileEntry) {
+  const fileEntry = await gl.fileReadPromise;
+  if (fileEntry && "token" in fileEntry && fileEntry.expiresAt > Date.now()) {
     cachedToken = { token: fileEntry.token, expiresAt: fileEntry.expiresAt };
     gl.cachedToken = cachedToken;
     return cachedToken.token;
   }
+  // fileReadPromise 결과가 유효하지 않으면 초기화하여 다음 호출에서 다시 읽을 수 있도록 함
+  gl.fileReadPromise = null;
   if (fileEntry && "cooldownUntil" in fileEntry && fileEntry.cooldownUntil > Date.now()) {
     const waitMs = fileEntry.cooldownUntil - Date.now();
     await new Promise((r) => setTimeout(r, Math.min(waitMs, TOKEN_RETRY_AFTER_MS)));
