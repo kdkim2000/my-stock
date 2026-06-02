@@ -4,6 +4,8 @@ import { getKisInvestorTradeDaily, getKisDailyTradeVolume } from "@/lib/kis-api"
 import type { KisTradingTrendRow } from "@/types/api";
 import { readTickerCache, writeTickerCache } from "@/lib/ticker-cache";
 
+export const maxDuration = 30;
+
 export interface TradingApiResponse {
   code: string;
   investorTradeDaily: KisTradingTrendRow[];

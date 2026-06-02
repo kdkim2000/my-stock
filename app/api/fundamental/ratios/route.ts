@@ -9,6 +9,8 @@ import {
 } from "@/lib/kis-api";
 import { readTickerCache, writeTickerCache } from "@/lib/ticker-cache";
 
+export const maxDuration = 30;
+
 export interface RatiosApiResponse {
   code: string;
   financialRatio: Record<string, unknown> | null;

@@ -27,6 +27,8 @@ import type {
 import { parseNum } from "@/lib/utils";
 import { readTickerCache, writeTickerCache } from "@/lib/ticker-cache";
 
+export const maxDuration = 30;
+
 export interface FundamentalApiKis {
   priceInfo: KisPriceInfo | null;
   per: number | null;

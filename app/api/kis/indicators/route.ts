@@ -5,6 +5,8 @@ import { getTechnicalIndicators } from "@/lib/indicators";
 import type { TechnicalIndicatorsResponse } from "@/types/api";
 import { readTickerCache, writeTickerCache } from "@/lib/ticker-cache";
 
+export const maxDuration = 30;
+
 /** 일봉 조회 기간 (MACD 26+9 등 고려, 최대 100건) */
 function getIndicatorDateRange(): { start: string; end: string } {
   const end = new Date();

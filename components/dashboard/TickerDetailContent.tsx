@@ -8,6 +8,7 @@ import { useSheetData } from "@/hooks/useSheetData";
 import { useTickerDetailQueries } from "@/hooks/useTickerDetailQueries";
 import { useAiGuidance } from "@/hooks/useAiGuidance";
 
+import { apiFetch } from "@/lib/api-client";
 import { formatRatioVal } from "./ticker-detail/utils";
 
 import { TickerDetailHeader } from "./ticker-detail/header";
@@ -26,6 +27,7 @@ import { JournalSection } from "./ticker-detail/sections/journal-section";
 
 function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
   const [revalidateTrigger, setRevalidateTrigger] = useState(0);
+  const [isRefreshingServer, setIsRefreshingServer] = useState(false);
   const queryClient = useQueryClient();
 
   // code 계산 및 모든 데이터 쿼리를 useTickerDetailQueries로 위임
@@ -177,15 +179,33 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
   );
   const hasPosition = (position?.quantity ?? 0) > 0;
 
-  const handleRefresh = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["kis", "stock-info", tickerOrCode] });
-    void queryClient.refetchQueries({ queryKey: ["kis", "stock-info", tickerOrCode] });
-    if (code && /^\d{6}$/.test(code)) {
-      setRevalidateTrigger((t) => t + 1);
-      queryClient.invalidateQueries({ queryKey: ["fundamental", code] });
-      queryClient.invalidateQueries({ queryKey: ["kis", "indicators", code] });
-      queryClient.invalidateQueries({ queryKey: ["kis", "opinion", code] });
-      void queryClient.refetchQueries({ queryKey: ["kis", "indicators", code] });
+  const handleRefresh = useCallback(async () => {
+    if (!code || !/^\d{6}$/.test(code)) return;
+    setIsRefreshingServer(true);
+    try {
+      // 통합 갱신: 1개 Vercel 함수에서 모든 KIS/DART 캐시 갱신
+      const res = await apiFetch(`/api/ticker/${code}/refresh`, { method: "POST" });
+      if (res.ok) {
+        // 캐시 갱신 완료 → 개별 라우트들이 Sheets 캐시(HIT)로 빠르게 응답
+        queryClient.invalidateQueries({ queryKey: ["kis", "stock-info", tickerOrCode] });
+        queryClient.invalidateQueries({ queryKey: ["fundamental", code] });
+        queryClient.invalidateQueries({ queryKey: ["kis", "indicators", code] });
+        queryClient.invalidateQueries({ queryKey: ["kis", "opinion", code] });
+        setRevalidateTrigger((t) => t + 1);
+        void queryClient.refetchQueries({ queryKey: ["kis", "stock-info", tickerOrCode] });
+      }
+    } catch {
+      // fallback: 기존 방식 (개별 revalidate=1 직접 요청)
+      queryClient.invalidateQueries({ queryKey: ["kis", "stock-info", tickerOrCode] });
+      void queryClient.refetchQueries({ queryKey: ["kis", "stock-info", tickerOrCode] });
+      if (code && /^\d{6}$/.test(code)) {
+        setRevalidateTrigger((t) => t + 1);
+        queryClient.invalidateQueries({ queryKey: ["fundamental", code] });
+        queryClient.invalidateQueries({ queryKey: ["kis", "indicators", code] });
+        queryClient.invalidateQueries({ queryKey: ["kis", "opinion", code] });
+      }
+    } finally {
+      setIsRefreshingServer(false);
     }
   }, [queryClient, tickerOrCode, code]);
 
@@ -212,7 +232,7 @@ function TickerDetailContentInner({ tickerOrCode }: { tickerOrCode: string }) {
         tickerOrCode={tickerOrCode}
         code={code}
         tickerStr={info?.ticker ?? tickerOrCode}
-        isRefreshing={isRefreshing}
+        isRefreshing={isRefreshing || isRefreshingServer}
         onRefresh={handleRefresh}
         priceInfo={priceInfo}
         hasPosition={hasPosition}
